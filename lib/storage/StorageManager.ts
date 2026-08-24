@@ -3,8 +3,8 @@
 import { PlayFile } from '../types/street';
 import { DEFAULT_SCENARIOS, SCENARIO_COMPLETE_STREET } from './defaultScenarios';
 
-const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v3';
-const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v3';
+const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v4';
+const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v4';
 
 export class StorageManager {
   /**
@@ -17,8 +17,8 @@ export class StorageManager {
       if (data) {
         const parsed = JSON.parse(data) as PlayFile;
         const hasNS = parsed.ingressPoints?.some((i) => i.side === 'north' || i.side === 'south');
-        const hasPedTurns = parsed.demandRoutes?.some((r) => r.id.startsWith('r_ped_'));
-        if (hasNS && hasPedTurns && parsed.street?.worldWidth) {
+        const hasTurnLanes = parsed.demandRoutes?.some((r) => r.id.startsWith('r_turn_left_'));
+        if (hasNS && hasTurnLanes && parsed.street?.worldWidth) {
           return parsed;
         }
       }
