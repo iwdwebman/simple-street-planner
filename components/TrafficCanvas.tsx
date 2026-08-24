@@ -23,6 +23,16 @@ interface HoveredVehicleInfo {
   screenY: number;
 }
 
+const VEHICLE_RENDER_DIMENSIONS: Record<VehicleType, { length: number; width: number }> = {
+  walker: { length: 12, width: 12 },
+  bike: { length: 20, width: 9 },
+  car: { length: 36, width: 16 },
+  truck: { length: 44, width: 17 },
+  delivery: { length: 48, width: 18 },
+  bus: { length: 80, width: 18 },
+  semi: { length: 105, width: 18 },
+};
+
 export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -88,8 +98,9 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
           const sprite = sprites[vehicle.type];
           if (!sprite) continue;
 
-          const lengthPx = vehicle.length * PIXELS_PER_METER;
-          const widthPx = vehicle.width * PIXELS_PER_METER;
+          const dims = VEHICLE_RENDER_DIMENSIONS[vehicle.type] || { length: 36, width: 16 };
+          const lengthPx = dims.length;
+          const widthPx = dims.width;
 
           ctx.save();
           ctx.translate(x, y);

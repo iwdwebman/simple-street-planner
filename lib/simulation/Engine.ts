@@ -197,10 +197,10 @@ export class Engine {
           }
         }
 
-        // Dynamic Yielding: Right-turn vehicles must yield to crossing pedestrians and cyclists
-        if (lane.type === 'turn_right' && lane.stopLine !== undefined) {
+        // Dynamic Yielding: Right-turn vehicles must yield to actively crossing pedestrians & cyclists on GREEN walk phases
+        if (lane.type === 'turn_right' && lane.stopLine !== undefined && laneSignalState === 'green') {
           const stopLineS = lane.stopLine;
-          if (v.s >= stopLineS - 25 && v.s <= stopLineS + 6) {
+          if (v.s >= stopLineS - 20 && v.s <= stopLineS + 4) {
             let conflictCrossing = false;
 
             let conflictLaneIds: string[] = [];
@@ -217,12 +217,22 @@ export class Engine {
             for (const cId of conflictLaneIds) {
               const cLane = this.lanes.get(cId);
               if (cLane && cLane.stopLine !== undefined) {
-                const isCrossing = cLane.vehicles.some(
-                  (cv) => cv.s >= cLane.stopLine! - 3 && cv.s <= cLane.stopLine! + 18,
-                );
-                if (isCrossing) {
-                  conflictCrossing = true;
-                  break;
+                // Check if the conflicting lane currently has a GREEN signal
+                let cSignal: 'green' | 'yellow' | 'red' = 'green';
+                for (const sig of this.signals) {
+                  cSignal = sig.getSignalStateForLane(cId);
+                  if (cSignal !== 'green') break;
+                }
+
+                // ONLY yield if the conflicting crosswalk/bike lane has a GREEN signal and active moving pedestrians/cyclists
+                if (cSignal === 'green') {
+                  const isCrossing = cLane.vehicles.some(
+                    (cv) => cv.v > 0.3 && cv.s >= cLane.stopLine! - 0.5 && cv.s <= cLane.stopLine! + 16,
+                  );
+                  if (isCrossing) {
+                    conflictCrossing = true;
+                    break;
+                  }
                 }
               }
             }
@@ -232,7 +242,7 @@ export class Engine {
                 sLead = stopLineS;
                 vLead = 0;
               }
-              if (v.s >= stopLineS - 0.5 && v.s <= stopLineS + 3.5) {
+              if (v.s >= stopLineS - 0.5 && v.s <= stopLineS + 3.0) {
                 v.v = 0;
                 v.a = 0;
                 v.s = stopLineS - 0.5;
