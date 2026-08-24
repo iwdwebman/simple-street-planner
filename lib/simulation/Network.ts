@@ -1,4 +1,4 @@
-// Bézier Road Network & 5x Multi-Corridor Lane Graph Builder with Turning Lanes
+// Bézier Road Network & 5x Multi-Corridor Lane Graph Builder with Pedestrian Crosswalks & Turning Lanes
 
 import { Vehicle } from './Vehicle';
 import { LaneType, LaneDirection, StreetConfig, LaneDefinition } from '../types/street';
@@ -32,7 +32,7 @@ export const MARGIN_PORTAL = 40;
 export const INTERSECTION_CORE_SIZE = 130; // px half-size of central crossroads
 
 /**
- * Generate 5x Bézier road network with through and turning lanes
+ * Generate 5x Bézier road network with through, turning, and pedestrian crosswalk lanes
  */
 export function buildNetworkFromConfig(config: StreetConfig): {
   lanes: LaneSegment[];
@@ -72,6 +72,8 @@ export function buildNetworkFromConfig(config: StreetConfig): {
 
   let yMotorEB = centerY - 25;
   let yMotorWB = centerY + 25;
+  let yWalkEB = centerY - totalHHeight / 2 + 15;
+  let yWalkWB = centerY + totalHHeight / 2 - 15;
 
   for (const laneDef of horizontalLanes) {
     const heightPx = Math.max(24, Math.round(laneDef.width * PIXELS_PER_METER));
@@ -80,6 +82,8 @@ export function buildNetworkFromConfig(config: StreetConfig): {
 
     if (laneDef.type === 'motor' && laneDef.direction === 'forward') yMotorEB = yCenter;
     if (laneDef.type === 'motor' && laneDef.direction === 'reverse') yMotorWB = yCenter;
+    if (laneDef.type === 'sidewalk' && laneDef.direction === 'forward') yWalkEB = yCenter;
+    if (laneDef.type === 'sidewalk' && laneDef.direction === 'reverse') yWalkWB = yCenter;
 
     const curveDeflection = curvature * 120;
 
@@ -116,8 +120,8 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       curve,
       vehicles: [],
       nextLanes: [],
-      stopLine: laneDef.type === 'motor' || laneDef.type === 'transit' ? stopLineDist : undefined,
-      speedLimitKmh: laneDef.speedLimitKmh || 50,
+      stopLine: stopLineDist, // Enforce stop line for ALL modes including walkers and bikes!
+      speedLimitKmh: laneDef.speedLimitKmh || (laneDef.type === 'sidewalk' ? 5 : laneDef.type === 'bike' ? 20 : 50),
     });
   }
 
@@ -131,6 +135,8 @@ export function buildNetworkFromConfig(config: StreetConfig): {
 
   let xMotorSB = centerX - 25;
   let xMotorNB = centerX + 25;
+  let xWalkNB = centerX - totalVWidth / 2 + 15;
+  let xWalkSB = centerX + totalVWidth / 2 - 15;
 
   for (const laneDef of effectiveVerticalLanes) {
     const widthPx = Math.max(24, Math.round(laneDef.width * PIXELS_PER_METER));
@@ -139,6 +145,8 @@ export function buildNetworkFromConfig(config: StreetConfig): {
 
     if (laneDef.type === 'motor' && laneDef.direction === 'forward') xMotorSB = xCenter;
     if (laneDef.type === 'motor' && laneDef.direction === 'reverse') xMotorNB = xCenter;
+    if (laneDef.type === 'sidewalk' && laneDef.direction === 'reverse') xWalkNB = xCenter;
+    if (laneDef.type === 'sidewalk' && laneDef.direction === 'forward') xWalkSB = xCenter;
 
     let p0 = { x: xCenter, y: topY };
     let p1 = { x: xCenter, y: topY + roadSpanY / 3 };
@@ -174,12 +182,12 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       curve,
       vehicles: [],
       nextLanes: [],
-      stopLine: laneDef.type === 'motor' || laneDef.type === 'transit' ? stopLineDist : undefined,
-      speedLimitKmh: laneDef.speedLimitKmh || 45,
+      stopLine: stopLineDist, // Enforce stop line for ALL modes including walkers and bikes!
+      speedLimitKmh: laneDef.speedLimitKmh || (laneDef.type === 'sidewalk' ? 5 : laneDef.type === 'bike' ? 20 : 45),
     });
   }
 
-  // 3. Build 8 Multi-Directional Turning Connector Lanes (Smooth Bézier Arcs)
+  // 3. Build 8 Multi-Directional Vehicular Turning Lanes
   const turningDefs: Array<{
     id: string;
     name: string;
@@ -291,6 +299,121 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       nextLanes: [],
       stopLine: tDef.stopLineDist,
       speedLimitKmh: 35,
+    });
+  }
+
+  // 4. Build 8 Multi-Directional Pedestrian Crosswalk & Turning Connectors
+  const pedTurnDefs: Array<{
+    id: string;
+    name: string;
+    p0: { x: number; y: number };
+    p1: { x: number; y: number };
+    p2: { x: number; y: number };
+    p3: { x: number; y: number };
+    stopLineDist: number;
+  }> = [
+    // West Walk -> South Walk
+    {
+      id: 'walk_turn_w_s',
+      name: 'Pedestrian Crossing West -> South',
+      p0: { x: leftX, y: yWalkEB },
+      p1: { x: centerX - INTERSECTION_CORE_SIZE - 20, y: yWalkEB },
+      p2: { x: xWalkSB, y: centerY + INTERSECTION_CORE_SIZE + 20 },
+      p3: { x: xWalkSB, y: bottomY },
+      stopLineDist: (roadSpanX / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // West Walk -> North Walk
+    {
+      id: 'walk_turn_w_n',
+      name: 'Pedestrian Crossing West -> North',
+      p0: { x: leftX, y: yWalkEB },
+      p1: { x: centerX - INTERSECTION_CORE_SIZE - 20, y: yWalkEB },
+      p2: { x: xWalkNB, y: centerY - INTERSECTION_CORE_SIZE - 20 },
+      p3: { x: xWalkNB, y: topY },
+      stopLineDist: (roadSpanX / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // East Walk -> North Walk
+    {
+      id: 'walk_turn_e_n',
+      name: 'Pedestrian Crossing East -> North',
+      p0: { x: rightX, y: yWalkWB },
+      p1: { x: centerX + INTERSECTION_CORE_SIZE + 20, y: yWalkWB },
+      p2: { x: xWalkNB, y: centerY - INTERSECTION_CORE_SIZE - 20 },
+      p3: { x: xWalkNB, y: topY },
+      stopLineDist: (roadSpanX / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // East Walk -> South Walk
+    {
+      id: 'walk_turn_e_s',
+      name: 'Pedestrian Crossing East -> South',
+      p0: { x: rightX, y: yWalkWB },
+      p1: { x: centerX + INTERSECTION_CORE_SIZE + 20, y: yWalkWB },
+      p2: { x: xWalkSB, y: centerY + INTERSECTION_CORE_SIZE + 20 },
+      p3: { x: xWalkSB, y: bottomY },
+      stopLineDist: (roadSpanX / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // North Walk -> West Walk
+    {
+      id: 'walk_turn_n_w',
+      name: 'Pedestrian Crossing North -> West',
+      p0: { x: xWalkSB, y: topY },
+      p1: { x: xWalkSB, y: centerY - INTERSECTION_CORE_SIZE - 20 },
+      p2: { x: centerX - INTERSECTION_CORE_SIZE - 20, y: yWalkWB },
+      p3: { x: leftX, y: yWalkWB },
+      stopLineDist: (roadSpanY / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // North Walk -> East Walk
+    {
+      id: 'walk_turn_n_e',
+      name: 'Pedestrian Crossing North -> East',
+      p0: { x: xWalkSB, y: topY },
+      p1: { x: xWalkSB, y: centerY - INTERSECTION_CORE_SIZE - 20 },
+      p2: { x: centerX + INTERSECTION_CORE_SIZE + 20, y: yWalkEB },
+      p3: { x: rightX, y: yWalkEB },
+      stopLineDist: (roadSpanY / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // South Walk -> East Walk
+    {
+      id: 'walk_turn_s_e',
+      name: 'Pedestrian Crossing South -> East',
+      p0: { x: xWalkNB, y: bottomY },
+      p1: { x: xWalkNB, y: centerY + INTERSECTION_CORE_SIZE + 20 },
+      p2: { x: centerX + INTERSECTION_CORE_SIZE + 20, y: yWalkEB },
+      p3: { x: rightX, y: yWalkEB },
+      stopLineDist: (roadSpanY / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+    // South Walk -> West Walk
+    {
+      id: 'walk_turn_s_w',
+      name: 'Pedestrian Crossing South -> West',
+      p0: { x: xWalkNB, y: bottomY },
+      p1: { x: xWalkNB, y: centerY + INTERSECTION_CORE_SIZE + 20 },
+      p2: { x: centerX - INTERSECTION_CORE_SIZE - 20, y: yWalkWB },
+      p3: { x: leftX, y: yWalkWB },
+      stopLineDist: (roadSpanY / 2 - INTERSECTION_CORE_SIZE) / PIXELS_PER_METER,
+    },
+  ];
+
+  for (const pDef of pedTurnDefs) {
+    const curve: CubicBezier = { p0: pDef.p0, p1: pDef.p1, p2: pDef.p2, p3: pDef.p3 };
+    const lengthPx = approximateBezierLength(curve, 28);
+    const lengthMeters = lengthPx / PIXELS_PER_METER;
+
+    lanes.push({
+      id: pDef.id,
+      name: pDef.name,
+      type: 'sidewalk',
+      direction: 'forward',
+      orientation: 'turn',
+      widthMeters: 2.6,
+      renderHeightPx: 40,
+      yOffsetPx: centerY,
+      length: lengthMeters,
+      curve,
+      vehicles: [],
+      nextLanes: [],
+      stopLine: pDef.stopLineDist,
+      speedLimitKmh: 5,
     });
   }
 

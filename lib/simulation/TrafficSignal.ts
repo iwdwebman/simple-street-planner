@@ -1,4 +1,4 @@
-// Traffic Signal Controller & Standard 4-Way Phase Sequencer
+// Traffic Signal Controller & Standard 4-Way Phase Sequencer with Pedestrian Walk Phases
 
 import { SignalPhaseConfig, SignalPresetPattern, LaneDefinition } from '../types/street';
 
@@ -38,7 +38,6 @@ export class TrafficSignal {
    * Get the current signal color for a given lane.
    */
   getSignalStateForLane(laneId: string): SignalLightColor {
-    // If the lane is not in the signal's scope, it's always green (uncontrolled)
     const isControlled = this.phases.some((p) => p.greenLaneIds.includes(laneId));
     if (!isControlled) return 'green';
 
@@ -107,7 +106,7 @@ export class TrafficSignal {
   }
 
   /**
-   * Generate standard 4-way phase patterns based on lane cross-section
+   * Generate standard 4-way phase patterns with pedestrian walk phases
    */
   static generatePresetPhases(
     pattern: SignalPresetPattern,
@@ -121,25 +120,19 @@ export class TrafficSignal {
       .filter((l) => (l.type === 'motor' || l.type === 'transit') && l.orientation === 'vertical')
       .map((l) => l.id);
 
-    const turnLanes = [
-      'turn_w_s', 'turn_w_n', 'turn_e_n', 'turn_e_s',
-      'turn_n_w', 'turn_n_e', 'turn_s_e', 'turn_s_w',
-    ];
-
-    const pedLanes = lanes
-      .filter((l) => l.type === 'sidewalk' || l.type === 'bike' || l.type === 'shared')
-      .map((l) => l.id);
+    const nsPedestrians = ['ns_walk_sb', 'ns_walk_nb', 'walk_turn_n_w', 'walk_turn_n_e', 'walk_turn_s_e', 'walk_turn_s_w'];
+    const ewPedestrians = ['sidewalk_eb', 'sidewalk_wb', 'walk_turn_w_s', 'walk_turn_w_n', 'walk_turn_e_n', 'walk_turn_e_s'];
 
     switch (pattern) {
       case 'NS_EW_STANDARD':
         return [
           {
             id: 'phase_ns',
-            name: 'North-South Corridor Green',
+            name: 'North-South Corridor Green & Walk',
             greenLaneIds: [
               ...nsMotor,
               'ns_travel_sb', 'ns_travel_nb', 'turn_n_w', 'turn_s_e',
-              'ns_bike_sb', 'ns_bike_nb', 'ns_walk_sb', 'ns_walk_nb',
+              'ns_bike_sb', 'ns_bike_nb', ...nsPedestrians,
             ],
             greenDuration: 25,
             yellowDuration: 3,
@@ -147,11 +140,11 @@ export class TrafficSignal {
           },
           {
             id: 'phase_ew',
-            name: 'East-West Boulevard Green',
+            name: 'East-West Boulevard Green & Walk',
             greenLaneIds: [
               ...ewMotor,
               'travel_eb_1', 'transit_eb', 'travel_wb_1', 'turn_w_s', 'turn_e_n',
-              'bike_eb', 'bike_wb', 'sidewalk_eb', 'sidewalk_wb',
+              'bike_eb', 'bike_wb', ...ewPedestrians,
             ],
             greenDuration: 28,
             yellowDuration: 3,
@@ -163,11 +156,11 @@ export class TrafficSignal {
         return [
           {
             id: 'phase_ns_through',
-            name: 'North-South Through & Right',
+            name: 'North-South Through, Right & Walk',
             greenLaneIds: [
               ...nsMotor,
               'ns_travel_sb', 'ns_travel_nb', 'turn_n_w', 'turn_s_e',
-              'ns_bike_sb', 'ns_bike_nb', 'ns_walk_sb', 'ns_walk_nb',
+              'ns_bike_sb', 'ns_bike_nb', ...nsPedestrians,
             ],
             greenDuration: 22,
             yellowDuration: 3,
@@ -183,11 +176,11 @@ export class TrafficSignal {
           },
           {
             id: 'phase_ew_through',
-            name: 'East-West Through & Right',
+            name: 'East-West Through, Right & Walk',
             greenLaneIds: [
               ...ewMotor,
               'travel_eb_1', 'transit_eb', 'travel_wb_1', 'turn_w_s', 'turn_e_n',
-              'bike_eb', 'bike_wb', 'sidewalk_eb', 'sidewalk_wb',
+              'bike_eb', 'bike_wb', ...ewPedestrians,
             ],
             greenDuration: 25,
             yellowDuration: 3,
@@ -208,7 +201,7 @@ export class TrafficSignal {
           {
             id: 'phase_north',
             name: 'North Approach Green (SB & Turns)',
-            greenLaneIds: ['ns_travel_sb', 'turn_n_w', 'turn_n_e', 'ns_bike_sb', 'ns_walk_sb'],
+            greenLaneIds: ['ns_travel_sb', 'turn_n_w', 'turn_n_e', 'ns_bike_sb', 'ns_walk_sb', 'walk_turn_n_w', 'walk_turn_n_e'],
             greenDuration: 18,
             yellowDuration: 3,
             allRedDuration: 2,
@@ -216,7 +209,7 @@ export class TrafficSignal {
           {
             id: 'phase_south',
             name: 'South Approach Green (NB & Turns)',
-            greenLaneIds: ['ns_travel_nb', 'turn_s_e', 'turn_s_w', 'ns_bike_nb', 'ns_walk_nb'],
+            greenLaneIds: ['ns_travel_nb', 'turn_s_e', 'turn_s_w', 'ns_bike_nb', 'ns_walk_nb', 'walk_turn_s_e', 'walk_turn_s_w'],
             greenDuration: 18,
             yellowDuration: 3,
             allRedDuration: 2,
@@ -224,7 +217,7 @@ export class TrafficSignal {
           {
             id: 'phase_west',
             name: 'West Approach Green (EB & Turns)',
-            greenLaneIds: ['travel_eb_1', 'transit_eb', 'turn_w_s', 'turn_w_n', 'bike_eb', 'sidewalk_eb'],
+            greenLaneIds: ['travel_eb_1', 'transit_eb', 'turn_w_s', 'turn_w_n', 'bike_eb', 'sidewalk_eb', 'walk_turn_w_s', 'walk_turn_w_n'],
             greenDuration: 20,
             yellowDuration: 3,
             allRedDuration: 2,
@@ -232,7 +225,7 @@ export class TrafficSignal {
           {
             id: 'phase_east',
             name: 'East Approach Green (WB & Turns)',
-            greenLaneIds: ['travel_wb_1', 'turn_e_n', 'turn_e_s', 'bike_wb', 'sidewalk_wb'],
+            greenLaneIds: ['travel_wb_1', 'turn_e_n', 'turn_e_s', 'bike_wb', 'sidewalk_wb', 'walk_turn_e_n', 'walk_turn_e_s'],
             greenDuration: 20,
             yellowDuration: 3,
             allRedDuration: 2,
@@ -259,12 +252,13 @@ export class TrafficSignal {
           },
           {
             id: 'phase_ped_scramble',
-            name: 'Pedestrian Scramble (All-Walk)',
+            name: 'Pedestrian Scramble (All-Walk Everywhere)',
             greenLaneIds: [
-              'sidewalk_eb', 'sidewalk_wb', 'ns_walk_sb', 'ns_walk_nb',
+              ...nsPedestrians,
+              ...ewPedestrians,
               'bike_eb', 'bike_wb', 'ns_bike_sb', 'ns_bike_nb',
             ],
-            greenDuration: 18,
+            greenDuration: 20,
             yellowDuration: 2,
             allRedDuration: 2,
           },
