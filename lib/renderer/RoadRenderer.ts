@@ -1,6 +1,6 @@
-// High-Fidelity Canvas Road Renderer with Markings, Signals, and Cross-Sections
+// High-Fidelity Canvas Road Renderer for 5x Expanded 4-Way Metropolis Crossroads
 
-import { LaneSegment, evaluateBezierFull, PIXELS_PER_METER } from '../simulation/Network';
+import { LaneSegment, evaluateBezierFull } from '../simulation/Network';
 import { TrafficSignal } from '../simulation/TrafficSignal';
 import { IntersectionConfig } from '../types/street';
 
@@ -22,42 +22,53 @@ export function drawRoads(
   lanes: LaneSegment[],
   signals: TrafficSignal[],
   intersections: IntersectionConfig[],
-  canvasWidth: number,
-  canvasHeight: number,
+  worldWidth: number,
+  worldHeight: number,
 ): void {
-  // Clear / Background Landscape
-  ctx.fillStyle = '#0F172A'; // Deep midnight slate
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  // 1. Clear / Background Landscape (Grid background)
+  ctx.fillStyle = '#090D16'; // Deep space midnight slate
+  ctx.fillRect(0, 0, worldWidth, worldHeight);
+
+  // Subtle background terrain grid lines
+  ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+  ctx.lineWidth = 1;
+  const gridSize = 100;
+  for (let x = 0; x <= worldWidth; x += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, worldHeight);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= worldHeight; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(worldWidth, y);
+    ctx.stroke();
+  }
 
   if (lanes.length === 0) return;
 
-  // 1. Draw Lane Pavement Surfaces
+  const centerX = worldWidth / 2;
+  const centerY = worldHeight / 2;
+
+  // 2. Draw Lane Pavement Surfaces (Horizontal & Vertical)
   for (const lane of lanes) {
     const halfH = lane.renderHeightPx / 2;
-    const p0 = lane.curve.p0;
-    const p3 = lane.curve.p3;
-    const minX = Math.min(p0.x, p3.x);
-    const maxX = Math.max(p0.x, p3.x);
-    const width = maxX - minX;
-
-    // Base pavement fill
     ctx.fillStyle = LANE_ASPHALT_COLORS[lane.type] || '#1E293B';
 
-    // Draw along Bézier ribbon or bounding strip
     ctx.beginPath();
     const steps = 30;
-    // Top boundary
+    // Top / Left boundary
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const pt = evaluateBezierFull(lane.curve, t);
-      // Offset perpendicular to angle
       const perpAngle = pt.angle + Math.PI / 2;
       const ox = pt.x + Math.cos(perpAngle) * halfH;
       const oy = pt.y + Math.sin(perpAngle) * halfH;
       if (i === 0) ctx.moveTo(ox, oy);
       else ctx.lineTo(ox, oy);
     }
-    // Bottom boundary in reverse
+    // Bottom / Right boundary in reverse
     for (let i = steps; i >= 0; i--) {
       const t = i / steps;
       const pt = evaluateBezierFull(lane.curve, t);
@@ -73,86 +84,117 @@ export function drawRoads(
     if (lane.type === 'sidewalk') {
       ctx.strokeStyle = '#CBD5E1';
       ctx.lineWidth = 1;
-      for (let x = minX; x < maxX; x += 18) {
-        ctx.beginPath();
-        ctx.moveTo(x, lane.yOffsetPx - halfH);
-        ctx.lineTo(x, lane.yOffsetPx + halfH);
-        ctx.stroke();
+      const p0 = lane.curve.p0;
+      const p3 = lane.curve.p3;
+      if (lane.orientation === 'vertical') {
+        const minY = Math.min(p0.y, p3.y);
+        const maxY = Math.max(p0.y, p3.y);
+        for (let y = minY; y < maxY; y += 22) {
+          ctx.beginPath();
+          ctx.moveTo((lane.xOffsetPx || centerX) - halfH, y);
+          ctx.lineTo((lane.xOffsetPx || centerX) + halfH, y);
+          ctx.stroke();
+        }
+      } else {
+        const minX = Math.min(p0.x, p3.x);
+        const maxX = Math.max(p0.x, p3.x);
+        for (let x = minX; x < maxX; x += 22) {
+          ctx.beginPath();
+          ctx.moveTo(x, lane.yOffsetPx - halfH);
+          ctx.lineTo(x, lane.yOffsetPx + halfH);
+          ctx.stroke();
+        }
       }
     }
 
     // Bike lane green stencil markers
     if (lane.type === 'bike') {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.font = '11px sans-serif';
+      ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
-      for (let x = minX + 60; x < maxX; x += 150) {
-        ctx.fillText('🚲', x, lane.yOffsetPx + 4);
+      const p0 = lane.curve.p0;
+      const p3 = lane.curve.p3;
+      if (lane.orientation === 'vertical') {
+        const minY = Math.min(p0.y, p3.y);
+        const maxY = Math.max(p0.y, p3.y);
+        for (let y = minY + 80; y < maxY; y += 240) {
+          ctx.fillText('🚲', lane.xOffsetPx || centerX, y + 4);
+        }
+      } else {
+        const minX = Math.min(p0.x, p3.x);
+        const maxX = Math.max(p0.x, p3.x);
+        for (let x = minX + 80; x < maxX; x += 240) {
+          ctx.fillText('🚲', x, lane.yOffsetPx + 4);
+        }
       }
     }
 
-    // Transit BRT text markings
+    // Transit text markings
     if (lane.type === 'transit') {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = 'bold 10px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      for (let x = minX + 100; x < maxX; x += 220) {
+      const p0 = lane.curve.p0;
+      const p3 = lane.curve.p3;
+      const minX = Math.min(p0.x, p3.x);
+      const maxX = Math.max(p0.x, p3.x);
+      for (let x = minX + 160; x < maxX; x += 320) {
         ctx.fillText('BUS ONLY', x, lane.yOffsetPx + 4);
       }
     }
   }
 
-  // 2. Draw Dividers, Striping, and Markings
+  // 3. Central 4-Way Intersection Pavement Box
+  ctx.fillStyle = '#1E293B'; // Dark asphalt core
+  const coreHalfSize = 130;
+  ctx.fillRect(centerX - coreHalfSize, centerY - coreHalfSize, coreHalfSize * 2, coreHalfSize * 2);
+
+  // 4. Draw Lane Dividers & Center Stripes
   for (let idx = 0; idx < lanes.length; idx++) {
     const lane = lanes[idx];
     const halfH = lane.renderHeightPx / 2;
     const nextLane = lanes[idx + 1];
 
-    if (nextLane) {
+    if (nextLane && lane.orientation === nextLane.orientation) {
       const isOpposing = lane.direction !== nextLane.direction;
-      const boundaryY = (lane.yOffsetPx + halfH + nextLane.yOffsetPx - nextLane.renderHeightPx / 2) / 2;
-
-      ctx.beginPath();
       const steps = 30;
 
       if (isOpposing) {
-        // Double Yellow Line for Two-Way Road divider
-        ctx.strokeStyle = '#FACC15'; // Bright Amber
+        // Double Yellow Line
+        ctx.strokeStyle = '#FACC15';
         ctx.lineWidth = 2;
         ctx.setLineDash([]);
 
-        // Line 1
         ctx.beginPath();
         for (let i = 0; i <= steps; i++) {
           const pt = evaluateBezierFull(lane.curve, i / steps);
-          const ox = pt.x;
-          const oy = pt.y + halfH - 1.5;
+          const ox = lane.orientation === 'vertical' ? pt.x + halfH - 1.5 : pt.x;
+          const oy = lane.orientation === 'vertical' ? pt.y : pt.y + halfH - 1.5;
           if (i === 0) ctx.moveTo(ox, oy);
           else ctx.lineTo(ox, oy);
         }
         ctx.stroke();
 
-        // Line 2
         ctx.beginPath();
         for (let i = 0; i <= steps; i++) {
           const pt = evaluateBezierFull(lane.curve, i / steps);
-          const ox = pt.x;
-          const oy = pt.y + halfH + 1.5;
+          const ox = lane.orientation === 'vertical' ? pt.x + halfH + 1.5 : pt.x;
+          const oy = lane.orientation === 'vertical' ? pt.y : pt.y + halfH + 1.5;
           if (i === 0) ctx.moveTo(ox, oy);
           else ctx.lineTo(ox, oy);
         }
         ctx.stroke();
       } else {
-        // White dashed line for same-direction lanes
+        // Dashed White Line
         ctx.strokeStyle = '#94A3B8';
         ctx.lineWidth = 1.5;
-        ctx.setLineDash([16, 12]);
+        ctx.setLineDash([18, 14]);
 
         ctx.beginPath();
         for (let i = 0; i <= steps; i++) {
           const pt = evaluateBezierFull(lane.curve, i / steps);
-          const ox = pt.x;
-          const oy = pt.y + halfH;
+          const ox = lane.orientation === 'vertical' ? pt.x + halfH : pt.x;
+          const oy = lane.orientation === 'vertical' ? pt.y : pt.y + halfH;
           if (i === 0) ctx.moveTo(ox, oy);
           else ctx.lineTo(ox, oy);
         }
@@ -164,20 +206,30 @@ export function drawRoads(
     // Direction arrows along center of lane
     if (lane.type === 'motor' || lane.type === 'transit' || lane.type === 'shared') {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.font = '14px sans-serif';
+      ctx.font = '16px sans-serif';
       ctx.textAlign = 'center';
-      const arrowChar = lane.direction === 'reverse' ? '⮜' : '⮞';
       const p0 = lane.curve.p0;
       const p3 = lane.curve.p3;
-      const minX = Math.min(p0.x, p3.x);
-      const maxX = Math.max(p0.x, p3.x);
-      for (let x = minX + 120; x < maxX - 80; x += 180) {
-        ctx.fillText(arrowChar, x, lane.yOffsetPx + 5);
+
+      if (lane.orientation === 'vertical') {
+        const arrowChar = lane.direction === 'reverse' ? '⮝' : '⮟';
+        const minY = Math.min(p0.y, p3.y);
+        const maxY = Math.max(p0.y, p3.y);
+        for (let y = minY + 180; y < maxY - 140; y += 300) {
+          ctx.fillText(arrowChar, lane.xOffsetPx || centerX, y + 6);
+        }
+      } else {
+        const arrowChar = lane.direction === 'reverse' ? '⮜' : '⮞';
+        const minX = Math.min(p0.x, p3.x);
+        const maxX = Math.max(p0.x, p3.x);
+        for (let x = minX + 180; x < maxX - 140; x += 300) {
+          ctx.fillText(arrowChar, x, lane.yOffsetPx + 6);
+        }
       }
     }
   }
 
-  // 3. Draw Intersections, Stop Lines, Stop Signs, and Traffic Signals
+  // 5. Draw Intersection Stop Lines, Crosswalks, and Signals
   const primaryIntersection = intersections[0];
 
   for (const lane of lanes) {
@@ -193,7 +245,6 @@ export function drawRoads(
         if (lightColor !== 'green') break;
       }
 
-      // Draw Stop Line
       const stopLineColor =
         primaryIntersection?.type === 'stop'
           ? '#EF4444'
@@ -206,21 +257,37 @@ export function drawRoads(
       ctx.strokeStyle = stopLineColor;
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(pt.x, pt.y - halfH);
-      ctx.lineTo(pt.x, pt.y + halfH);
+      if (lane.orientation === 'vertical') {
+        ctx.moveTo(pt.x - halfH, pt.y);
+        ctx.lineTo(pt.x + halfH, pt.y);
+      } else {
+        ctx.moveTo(pt.x, pt.y - halfH);
+        ctx.lineTo(pt.x, pt.y + halfH);
+      }
       ctx.stroke();
 
-      // Zebra Crosswalk stripes near stop line
+      // Zebra crosswalk stripes
       ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      for (let cy = pt.y - halfH + 4; cy < pt.y + halfH - 4; cy += 8) {
-        const offset = lane.direction === 'reverse' ? -10 : 2;
-        ctx.fillRect(pt.x + offset, cy, 8, 4);
+      if (lane.orientation === 'vertical') {
+        for (let cx = pt.x - halfH + 4; cx < pt.x + halfH - 4; cx += 8) {
+          const offset = lane.direction === 'reverse' ? 2 : -10;
+          ctx.fillRect(cx, pt.y + offset, 4, 8);
+        }
+      } else {
+        for (let cy = pt.y - halfH + 4; cy < pt.y + halfH - 4; cy += 8) {
+          const offset = lane.direction === 'reverse' ? -10 : 2;
+          ctx.fillRect(pt.x + offset, cy, 8, 4);
+        }
       }
 
-      // If Traffic Signal, draw compact 3-light indicator box
+      // Traffic Light Head Box
       if (primaryIntersection?.type === 'lights') {
-        const boxX = pt.x + (lane.direction === 'reverse' ? -22 : 6);
-        const boxY = pt.y - 12;
+        let boxX = pt.x + (lane.direction === 'reverse' ? -22 : 6);
+        let boxY = pt.y - 12;
+        if (lane.orientation === 'vertical') {
+          boxX = pt.x - 8;
+          boxY = pt.y + (lane.direction === 'reverse' ? 8 : -26);
+        }
 
         ctx.fillStyle = '#0F172A';
         ctx.strokeStyle = '#334155';
@@ -228,54 +295,84 @@ export function drawRoads(
         ctx.fillRect(boxX, boxY, 16, 24);
         ctx.strokeRect(boxX, boxY, 16, 24);
 
-        // Red light
+        // Red
         ctx.beginPath();
         ctx.arc(boxX + 8, boxY + 5, 2.8, 0, Math.PI * 2);
         ctx.fillStyle = lightColor === 'red' ? '#EF4444' : '#450A0A';
         ctx.fill();
 
-        // Yellow light
+        // Yellow
         ctx.beginPath();
         ctx.arc(boxX + 8, boxY + 12, 2.8, 0, Math.PI * 2);
         ctx.fillStyle = lightColor === 'yellow' ? '#FACC15' : '#422006';
         ctx.fill();
 
-        // Green light
+        // Green
         ctx.beginPath();
         ctx.arc(boxX + 8, boxY + 19, 2.8, 0, Math.PI * 2);
         ctx.fillStyle = lightColor === 'green' ? '#22C55E' : '#052E16';
         ctx.fill();
       }
-
-      // If Stop Sign, draw red octagon
-      if (primaryIntersection?.type === 'stop') {
-        const octX = pt.x + (lane.direction === 'reverse' ? -18 : 10);
-        const octY = pt.y;
-        ctx.fillStyle = '#DC2626';
-        ctx.beginPath();
-        ctx.arc(octX, octY, 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 7px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('STOP', octX, octY + 2.5);
-      }
     }
   }
 
-  // 4. Lane Info Labels (Left Edge)
-  for (const lane of lanes) {
-    const p0 = lane.curve.p0;
-    const p3 = lane.curve.p3;
-    const minX = Math.min(p0.x, p3.x);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-    ctx.fillRect(minX + 4, lane.yOffsetPx - 9, 130, 18);
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)';
-    ctx.strokeRect(minX + 4, lane.yOffsetPx - 9, 130, 18);
+  // 6. Draw Glowing 4-Side Perimeter Ingress & Outgress Portals
+  drawPortalBadge(ctx, 40, centerY, 'WEST PORTAL', 'Ingress (EB) · Outgress (WB)', '#3B82F6', 'left');
+  drawPortalBadge(ctx, worldWidth - 40, centerY, 'EAST PORTAL', 'Ingress (WB) · Outgress (EB)', '#10B981', 'right');
+  drawPortalBadge(ctx, centerX, 40, 'NORTH PORTAL', 'Ingress (SB) · Outgress (NB)', '#F59E0B', 'top');
+  drawPortalBadge(ctx, centerX, worldHeight - 40, 'SOUTH PORTAL', 'Ingress (NB) · Outgress (SB)', '#8B5CF6', 'bottom');
+}
 
-    ctx.fillStyle = '#F8FAFC';
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${lane.name.slice(0, 14)} (${lane.widthMeters}m)`, minX + 8, lane.yOffsetPx + 3);
-  }
+function drawPortalBadge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  title: string,
+  subtitle: string,
+  accentColor: string,
+  side: 'left' | 'right' | 'top' | 'bottom',
+): void {
+  ctx.save();
+  const boxW = 210;
+  const boxH = 46;
+
+  let rx = x - boxW / 2;
+  let ry = y - boxH / 2;
+
+  if (side === 'left') rx = x + 10;
+  if (side === 'right') rx = x - boxW - 10;
+  if (side === 'top') ry = y + 10;
+  if (side === 'bottom') ry = y - boxH - 10;
+
+  // Outer glow & card
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = accentColor;
+  ctx.shadowBlur = 10;
+
+  ctx.beginPath();
+  ctx.roundRect(rx, ry, boxW, boxH, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Title
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(title, rx + 12, ry + 18);
+
+  // Subtitle
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '9px monospace';
+  ctx.fillText(subtitle, rx + 12, ry + 34);
+
+  // Status Indicator Dot
+  ctx.fillStyle = accentColor;
+  ctx.beginPath();
+  ctx.arc(rx + boxW - 16, ry + 18, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }

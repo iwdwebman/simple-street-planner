@@ -8,6 +8,10 @@ This document tracks implemented features, active improvements, and upcoming roa
 
 ### Core Road & Streetmix Tools
 - [x] Multi-lane Bézier lane graph with 2D coordinate system
+- [x] **5x Expanded 2D World Map** ($3200\text{ px} \times 2400\text{ px}$)
+- [x] **4-Side Perimeter Ingress & Outgress Portals** (North, South, East, West center gates)
+- [x] **Pan & Zoom Viewport Navigation** (Drag to pan, scroll to zoom, on-screen controls)
+- [x] **Interactive Minimap Radar HUD**
 - [x] Streetmix-style cross-section interactive lane editor
 - [x] Per-lane customization (lane type, width in meters/feet, travel direction)
 - [x] Support for one-way and two-way street configurations
@@ -32,8 +36,8 @@ This document tracks implemented features, active improvements, and upcoming roa
 - [ ] Vehicle collision and near-miss heatmaps
 
 ### Demand & Time-of-Day Routing
-- [x] Ingress (origin/spawn) and Outgress (sink/exit) point network architecture
-- [x] Origin-Destination (OD) demand matrix routing
+- [x] 4-way Perimeter Ingress & Outgress point network architecture
+- [x] Origin-Destination (OD) demand matrix routing (W $\to$ E, E $\to$ W, N $\to$ S, S $\to$ N, turning flows)
 - [x] Diurnal 24-hour Time-of-Day curve modulation (AM Peak, Midday, PM Peak, Night)
 - [x] Interactive simulation time scrubber and speed multiplier controls (0.5x to 20x)
 - [x] Admin Editor to configure demand flows and save custom play files
@@ -58,45 +62,12 @@ This document tracks implemented features, active improvements, and upcoming roa
 - [x] LocalStorage persistence for active street configuration and user modifications
 - [x] Play file scenario manager (Save, Load, Export JSON, Import JSON, Reset to Defaults)
 - [x] Built-in scenario presets:
-  - [x] *Downtown Complete Street*
-  - [x] *Commercial Logistics Corridor*
-  - [x] *Suburban Arterial with Turn Bays*
-  - [x] *Shared Woonerf / Festival Street*
+  - [x] *🌆 Metropolis 4-Way Grand Crossroads (5x Map)*
+  - [x] *🚛 Commercial Logistics Corridor*
+  - [x] *🏡 Shared Woonerf / Living Street*
 - [ ] Cloud scenario sharing via URL hash / short links
 
 ### AI Customization Skills
 - [x] `.agents/skills/street-planner-basics/SKILL.md`
 - [x] `.agents/skills/vehicle-types/SKILL.md`
 - [x] `.agents/skills/street-types-speeds/SKILL.md`
-
----
-
-## 2. What Was Added in This Phase
-
-1. **7 Vehicle Types & Calibrated Kinematics**:
-   - Expanded vehicle model from basic 4 to full 7 types (Walkers, Bikes, Cars, Trucks, Delivery vans, Buses, Semis) with exact physical dimensions, IDM parameters, and dedicated SVG sprites.
-2. **Streetmix-Style Interactive Cross-Section Editor**:
-   - Visual lane strips with live width adjustments, direction toggles (EB/WB/NB/SB), reordering, add/remove lane drawer, and street classification selection.
-3. **Curvature Physics Engine**:
-   - First and second derivative Bézier geometry engine calculating curvature $\kappa(t)$, radius $R(t)$, and max safe curve speed $v_{\text{safe}}(t)$ to simulate realistic deceleration in curves.
-4. **Time-of-Day OD Demand Manager & Admin Editor**:
-   - Configurable ingress/outgress OD demand matrix with 24-hour diurnal profile curve and real-time clock scrubber.
-5. **Intersection Control Suite**:
-   - Integrated Merge, Stop-sign, and Multi-Phase Traffic Signal engine with preset patterns (N-S/E-W, Protected Turns, Split Phase, Scramble) and custom phase timings.
-6. **Persistence & Play Files**:
-   - LocalStorage auto-saving and JSON scenario import/export.
-7. **Customization Skills & Roadmap**:
-   - Added 3 AI skills for future developer/agent sessions and this roadmap document.
-
----
-
-## 3. What is Needed Next (Upcoming Milestones)
-
-1. **Multi-Street Urban Grid**:
-   - Connecting multiple street segments into a 2D network with T-junctions, 4-way intersections, and roundabouts.
-2. **Lane Changing & Overtaking (MOBIL Algorithm)**:
-   - Allow vehicles to assess incentive and safety criteria to switch into faster/emptier adjacent lanes.
-3. **Environmental & Acoustic Impact Metrics**:
-   - Noise level estimation (dB), carbon emissions ($g\text{ CO}_2/\text{km}$), and pedestrian comfort indices.
-4. **3D / Isometric Street Visualizer**:
-   - Optional 3D/isometric view mode utilizing Three.js / WebGL.

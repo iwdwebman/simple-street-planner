@@ -15,6 +15,7 @@ export type LaneType =
   | 'shared';
 
 export type LaneDirection = 'forward' | 'reverse' | 'bidirectional';
+export type LaneOrientation = 'horizontal' | 'vertical' | 'turn';
 
 export interface LaneDefinition {
   id: string;
@@ -22,6 +23,8 @@ export interface LaneDefinition {
   type: LaneType;
   width: number;             // in meters (e.g., 3.0 m)
   direction: LaneDirection;  // forward (EB/NB), reverse (WB/SB), bidirectional
+  orientation?: LaneOrientation; // horizontal (EW), vertical (NS), or turn curve
+  corridorId?: string;       // e.g. 'corridor_ew', 'corridor_ns'
   speedLimitKmh?: number;    // optional custom speed limit
   stopLineMeters?: number;   // stop line distance from lane start (m)
 }
@@ -116,11 +119,14 @@ export interface IntersectionConfig {
   currentPhaseIndex?: number;
 }
 
+export type PortalSide = 'north' | 'south' | 'east' | 'west';
+
 export interface IngressPoint {
   id: string;
   name: string;
   laneId: string;
   positionMeters: number;    // spawn s position along lane (usually 0)
+  side?: PortalSide;         // which perimeter side of the 5x map
 }
 
 export interface OutgressPoint {
@@ -128,6 +134,7 @@ export interface OutgressPoint {
   name: string;
   laneId: string;
   positionMeters: number;    // exit s position along lane
+  side?: PortalSide;         // which perimeter side of the 5x map
 }
 
 export interface DemandRoute {
@@ -158,6 +165,8 @@ export interface StreetConfig {
   curveRadiusMeters?: number; // Infinity for straight, or e.g. 150m for curved
   curvatureIntensity?: number; // -1.0 to 1.0 (0 = straight)
   lanes: LaneDefinition[];
+  worldWidth?: number;        // default 3200px
+  worldHeight?: number;       // default 2400px
 }
 
 export interface PlayFile {

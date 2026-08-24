@@ -17,8 +17,13 @@ The Simple Street Planner is organized into five decoupled layers:
    - Supports export/import of scenario JSON play files.
 
 2. **Graph & Geometry Layer** (`lib/simulation/Network.ts`, `lib/simulation/Curvature.ts`):
-   - Translates high-level Streetmix cross-section lane arrays into 2D cubic Bézier curves.
-   - Computes arc lengths, tangents, normal vectors, and local radius of curvature $R(s)$.
+   - Generates a **5x Expanded 2D World Network** ($3200\text{ px} \times 2400\text{ px}$, $\approx 200\text{ m} \times 150\text{ m}$ scaled).
+   - Manages four perimeter ingress/outgress portals at the center of each perimeter side:
+     - **West Center**: Ingress (EB) & Outgress (WB)
+     - **East Center**: Ingress (WB) & Outgress (EB)
+     - **North Center**: Ingress (SB) & Outgress (NB)
+     - **South Center**: Ingress (NB) & Outgress (SB)
+   - Translates cross-sections into 2D cubic Bézier curves with arc lengths, tangents, normal vectors, and local radius of curvature $R(s)$.
 
 3. **Physics & Kinematics Engine** (`lib/simulation/Engine.ts`, `lib/simulation/Vehicle.ts`):
    - Runs a fixed-timestep update loop ($\Delta t = 1/60$s) independent of render frame rate.
@@ -26,38 +31,32 @@ The Simple Street Planner is organized into five decoupled layers:
    - Enforces speed limits, curvature safety limits, stop-sign pauses, and traffic signal obedience.
 
 4. **Demand & Routing Engine** (`lib/simulation/DemandManager.ts`):
-   - Manages Ingress (spawning) and Outgress (sink/exit) points.
-   - Computes dynamic vehicle spawning rates from Origin-Destination (OD) demand matrices modulated by a 24-hour diurnal Time-of-Day curve.
+   - Manages Origin-Destination (OD) demand matrices connecting all 4 perimeter portals (through and turning movements).
+   - Modulates spawning rates using a 24-hour diurnal Time-of-Day curve.
 
 5. **Presentation & Rendering Layer** (`components/`, `lib/renderer/`):
-   - HTML5 Canvas renderer for asphalt, road markings, crosswalks, signals, and vehicle sprites.
-   - React UI: Streetmix-style cross-section editor, Intersection configurator, Admin scenario editor, and Metrics HUD.
+   - HTML5 Canvas renderer with interactive **Pan and Zoom Viewport** ($0.2\times$ to $3.0\times$), camera transformation matrices, and a floating **Minimap Radar**.
+   - React UI: Streetmix-style cross-section editor, 4-Way Intersection configurator, Admin scenario editor, and Metrics HUD.
 
 ---
 
-## 2. Coordinate System & Scaling
+## 2. Coordinate System & 5x Scaling
 
-- **Canvas Dimensions**: Coordinate space is normalized to pixels where:
-  - Standard Lane Width: $3.0\text{ m} \approx 40 - 60\text{ px}$.
-  - Scale Factor: $1\text{ meter} \approx 15\text{ px}$.
-- **Longitudinal Coordinate ($s$)**:
-  - Distance in meters from the start of a lane segment ($s = 0$) to its end ($s = L$).
+- **World Dimensions**: $3200\text{ px} \times 2400\text{ px}$ with origin $(0, 0)$ at top-left and central crossroads at $(1600, 1200)$.
+- **Scale Factor**: $1\text{ meter} \approx 16\text{ px}$.
+- **Longitudinal Coordinate ($s$)**: Distance in meters along each lane segment ($s = 0$ at ingress to $s = L$ at outgress).
 - **Parametric Bézier Mapping ($t \in [0, 1]$)**:
-  - For a lane of length $L$, $t = s / L$.
   - Position $\mathbf{p}(t) = (1-t)^3 \mathbf{p}_0 + 3(1-t)^2 t \mathbf{p}_1 + 3(1-t) t^2 \mathbf{p}_2 + t^3 \mathbf{p}_3$.
   - Heading angle $\theta(t) = \text{atan2}(y'(t), x'(t))$.
 
 ---
 
-## 3. Two-Way vs. One-Way Road Conventions
+## 3. Four-Way Perimeter Portals
 
-- **One-Way Road**:
-  - All travel lanes share the same travel direction (`forward`).
-  - Ingress points are located on the left edge ($x = x_{\min}$), outgress points on the right edge ($x = x_{\max}$).
-- **Two-Way Road**:
-  - Top half (or Eastbound/Northbound) travel lanes move `forward`.
-  - Bottom half (or Westbound/Southbound) travel lanes move `reverse` with inverted Bézier curve control points ($\mathbf{p}_0 \leftrightarrow \mathbf{p}_3$).
-  - Separated by center turn lanes, medians, or double yellow divider lines.
+- **West Portal**: $(x=40, y=1200)$
+- **East Portal**: $(x=3160, y=1200)$
+- **North Portal**: $(x=1600, y=40)$
+- **South Portal**: $(x=1600, y=2360)$
 
 ---
 
@@ -71,9 +70,10 @@ export interface PlayFile {
   version: string;
   street: StreetConfig;
   intersections: IntersectionConfig[];
-  demand: DemandScheduleConfig;
-  timeOfDay: number; // 0 - 24 hours
+  ingressPoints: IngressPoint[];
+  outgressPoints: OutgressPoint[];
+  demandRoutes: DemandRoute[];
+  timeOfDayProfile: TimeOfDayProfile;
+  initialTimeOfDayHours: number; // 0 - 24 hours
 }
 ```
-
-When modifying the engine or UI, always maintain backward compatibility with saved play files in `localStorage`.

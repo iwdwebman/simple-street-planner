@@ -346,24 +346,100 @@ body {
 }
 
 /* =========================================================================
-   Canvas Wrapper & Tooltip
+   Canvas Wrapper, Pan/Zoom Controls & Minimap
    ========================================================================= */
 .traffic-canvas-wrapper {
   position: relative;
   width: 100%;
+  height: 650px;
   display: flex;
   justify-content: center;
+  align-items: center;
   background: #090D16;
-  padding: 16px;
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
-  overflow-x: auto;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 .traffic-canvas {
   display: block;
+  width: 100%;
+  height: 100%;
+  background: #090D16;
+}
+
+.canvas-viewport-controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 6px 10px;
   border-radius: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border-subtle);
+  z-index: 10;
+}
+
+.btn-viewport-action {
+  background: #1E293B;
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-viewport-action:hover {
+  background: var(--accent-blue);
+  color: white;
+  border-color: var(--accent-blue);
+}
+
+.zoom-level-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  padding-left: 6px;
+  border-left: 1px solid var(--border-subtle);
+  min-width: 40px;
+  text-align: center;
+}
+
+.canvas-minimap-card {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(8px);
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+.minimap-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
+.minimap-canvas {
+  display: block;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  background: #090D16;
 }
 
 .vehicle-tooltip {
