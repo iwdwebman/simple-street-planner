@@ -1,92 +1,139 @@
-// 1D longitudinal kinematics & IDM car-following model
+// Intelligent Driver Model (IDM) kinematics with 7 vehicle types and curvature speed limits
 
-export type VehicleType = 'car' | 'bus' | 'bike' | 'pedestrian';
+import { VehicleType, VEHICLE_CONFIGS } from '../types/vehicle';
 
-export interface VehicleConfig {
+export interface VehicleInitConfig {
   type: VehicleType;
   laneId: string;
-  s: number; // initial position along lane (m)
-  v: number; // initial speed (m/s)
+  s: number;               // initial position along lane (m)
+  v: number;               // initial speed (m/s)
+  destinationOutgressId?: string;
+  spawnTimeSeconds?: number;
 }
 
-// IDM parameters per vehicle type
-const IDM_PARAMS: Record<
-  VehicleType,
-  { v0: number; a: number; b: number; T: number; s0: number; length: number; width: number }
-> = {
-  car: { v0: 11.0, a: 1.5, b: 2.0, T: 1.5, s0: 2.0, length: 4.5, width: 2.0 },
-  bus: { v0: 8.0, a: 0.8, b: 1.5, T: 2.0, s0: 3.0, length: 12.0, width: 2.5 },
-  bike: { v0: 4.5, a: 1.0, b: 1.5, T: 1.0, s0: 1.0, length: 1.8, width: 0.6 },
-  pedestrian: { v0: 1.2, a: 0.5, b: 1.0, T: 0.8, s0: 0.5, length: 0.5, width: 0.5 },
-};
-
-let nextId = 0;
+let nextVehicleId = 1;
 
 export class Vehicle {
   id: number;
   type: VehicleType;
   laneId: string;
-  s: number;
-  v: number;
-  a: number;
-  length: number;
-  width: number;
-  // IDM parameters
-  v0: number;
-  aMax: number;
-  b: number;
-  T: number;
-  s0: number;
+  destinationOutgressId?: string;
 
-  constructor(config: VehicleConfig) {
-    this.id = nextId++;
+  // Kinematics state
+  s: number;               // longitudinal position (m) along lane
+  v: number;               // longitudinal speed (m/s)
+  a: number;               // current acceleration (m/s^2)
+
+  // Geometry
+  length: number;          // bumper-to-bumper length (m)
+  width: number;           // vehicle width (m)
+
+  // IDM Physics Parameters
+  v0: number;              // free-flow desired speed (m/s)
+  aMax: number;            // max acceleration (m/s^2)
+  bComf: number;           // comfortable deceleration (m/s^2)
+  T: number;               // desired time gap (s)
+  s0: number;              // minimum jam distance (m)
+
+  // Stop sign & signal states
+  stopDwellTimer: number;  // seconds elapsed while stopped at stop line
+  hasCompletedStop: boolean; // whether stop-sign required pause has been satisfied
+
+  // Telemetry & Metrics
+  spawnTime: number;
+  distanceTraveled: number;
+
+  constructor(config: VehicleInitConfig) {
+    this.id = nextVehicleId++;
     this.type = config.type;
     this.laneId = config.laneId;
+    this.destinationOutgressId = config.destinationOutgressId;
+
     this.s = config.s;
-    this.v = config.v;
+    this.v = Math.max(0, config.v);
     this.a = 0;
 
-    const params = IDM_PARAMS[config.type];
-    this.length = params.length;
-    this.width = params.width;
-    this.v0 = params.v0;
-    this.aMax = params.a;
-    this.b = params.b;
-    this.T = params.T;
-    this.s0 = params.s0;
+    const meta = VEHICLE_CONFIGS[config.type] || VEHICLE_CONFIGS.car;
+    this.length = meta.params.length;
+    this.width = meta.params.width;
+    this.v0 = meta.params.v0;
+    this.aMax = meta.params.aMax;
+    this.bComf = meta.params.bComf;
+    this.T = meta.params.T;
+    this.s0 = meta.params.s0;
+
+    this.stopDwellTimer = 0;
+    this.hasCompletedStop = false;
+    this.spawnTime = config.spawnTimeSeconds ?? 0;
+    this.distanceTraveled = 0;
   }
 
   /**
-   * Compute IDM acceleration given the gap and approach rate to the leader.
-   * @param sLead  position of leader vehicle front bumper (Infinity if no leader)
-   * @param vLead  speed of leader (same as own speed if no leader)
+   * Compute IDM acceleration with respect to a leading obstacle or vehicle.
+   * @param sLead Position of leader front bumper (Infinity if no obstacle)
+   * @param vLead Speed of leader (or 0 for stationary stop-line)
+   * @param vTarget Local target speed limit (considers base speed, street limit, and curvature)
    */
-  computeAcceleration(sLead: number, vLead: number): number {
+  computeAcceleration(sLead: number, vLead: number, vTarget: number): number {
+    const effectiveV0 = Math.max(0.5, Math.min(this.v0, vTarget));
     const gap = sLead - this.s - this.length;
     const dv = this.v - vLead;
 
     let sStar: number;
     if (gap <= 0) {
-      // Emergency braking — gap is zero or negative
+      // Emergency braking when gap is closed
       sStar = Infinity;
     } else {
-      sStar =
-        this.s0 +
-        Math.max(0, this.v * this.T + (this.v * dv) / (2 * Math.sqrt(this.aMax * this.b)));
+      const term1 = this.s0 + this.v * this.T;
+      const term2 = (this.v * dv) / (2 * Math.sqrt(this.aMax * this.bComf));
+      sStar = term1 + Math.max(0, term2);
     }
 
-    const freeRoad = 1 - Math.pow(this.v / this.v0, 4);
-    const interaction = gap > 0 ? Math.pow(sStar / gap, 2) : 1;
+    // Free road term
+    const freeRoad = 1 - Math.pow(this.v / effectiveV0, 4);
+    // Interaction term
+    const interaction = gap > 0 ? Math.pow(sStar / gap, 2) : 100;
 
-    return this.aMax * (freeRoad - interaction);
+    const acc = this.aMax * (freeRoad - interaction);
+    return acc;
   }
 
   /**
-   * Integrate kinematics one timestep.
+   * Integrate kinematics forward by dt seconds.
    */
-  integrate(dt: number, acc: number): void {
-    this.a = Math.max(-8, Math.min(4, acc)); // clamp acceleration
+  integrate(dt: number, rawAcc: number): void {
+    // Clamp acceleration between hard braking (-8 m/s^2) and max capability
+    this.a = Math.max(-8.0, Math.min(this.aMax * 1.5, rawAcc));
     this.v = Math.max(0, this.v + this.a * dt);
-    this.s += this.v * dt;
+    const ds = this.v * dt;
+    this.s += ds;
+    this.distanceTraveled += ds;
+  }
+
+  /**
+   * Check and update stop sign dwell state.
+   */
+  updateStopState(dt: number, isAtStopSign: boolean, requiredDwellSeconds = 2.0): boolean {
+    if (!isAtStopSign) {
+      if (this.hasCompletedStop && this.s > 5) {
+        // Reset when well clear of stop line
+      }
+      return false;
+    }
+
+    if (this.hasCompletedStop) {
+      return false; // already stopped and cleared to go
+    }
+
+    // If speed is very low near the stop line, accumulate dwell timer
+    if (this.v <= 0.3) {
+      this.stopDwellTimer += dt;
+      if (this.stopDwellTimer >= requiredDwellSeconds) {
+        this.hasCompletedStop = true;
+        return false;
+      }
+    }
+
+    return true; // still needs to stay stopped
   }
 }

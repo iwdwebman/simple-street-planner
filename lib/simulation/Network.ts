@@ -1,194 +1,96 @@
-// 2D cubic Bézier helpers and lane graph
+// Bézier Road Network & Lane Graph Builder
 
-import { Vehicle, VehicleType } from './Vehicle';
+import { Vehicle } from './Vehicle';
+import { LaneType, LaneDirection, StreetConfig } from '../types/street';
+import { CubicBezier, evaluateBezierFull, approximateBezierLength } from './Curvature';
 
-export interface Vec2 {
-  x: number;
-  y: number;
-}
-
-export interface CubicBezier {
-  p0: Vec2;
-  p1: Vec2;
-  p2: Vec2;
-  p3: Vec2;
-}
-
-export function evaluateBezier(
-  curve: CubicBezier,
-  t: number,
-): { x: number; y: number; angle: number } {
-  const mt = 1 - t;
-  const x =
-    mt * mt * mt * curve.p0.x +
-    3 * mt * mt * t * curve.p1.x +
-    3 * mt * t * t * curve.p2.x +
-    t * t * t * curve.p3.x;
-  const y =
-    mt * mt * mt * curve.p0.y +
-    3 * mt * mt * t * curve.p1.y +
-    3 * mt * t * t * curve.p2.y +
-    t * t * t * curve.p3.y;
-
-  // Tangent (derivative) for angle
-  const dx =
-    3 * mt * mt * (curve.p1.x - curve.p0.x) +
-    6 * mt * t * (curve.p2.x - curve.p1.x) +
-    3 * t * t * (curve.p3.x - curve.p2.x);
-  const dy =
-    3 * mt * mt * (curve.p1.y - curve.p0.y) +
-    6 * mt * t * (curve.p2.y - curve.p1.y) +
-    3 * t * t * (curve.p3.y - curve.p2.y);
-
-  return { x, y, angle: Math.atan2(dy, dx) };
-}
-
-export type LaneType = 'motor' | 'bike' | 'pedestrian' | 'transit';
+export { evaluateBezierFull, approximateBezierLength };
+export type { CubicBezier };
 
 export interface LaneSegment {
   id: string;
+  name: string;
   type: LaneType;
-  length: number;
+  direction: LaneDirection;
+  widthMeters: number;
+  renderHeightPx: number;
+  yOffsetPx: number;       // Center y position of this lane in pixels
+  length: number;          // Longitudinal length in meters
   curve: CubicBezier;
-  vehicles: Vehicle[]; // sorted descending by s
+  vehicles: Vehicle[];     // Current vehicles in lane
   nextLanes: string[];
-  /** Stop-line position (meters). Vehicles stop here when signal is red. Undefined = no stop line. */
-  stopLine?: number;
+  stopLine?: number;       // Stop-line position in meters (if present)
+  speedLimitKmh: number;   // Base speed limit on this lane
 }
 
-export interface SpawnProfile {
-  laneId: string;
-  vehicleType: VehicleType;
-  /** Vehicles per second */
-  rate: number;
-  /** Accumulated inter-arrival time */
-  _accumulator: number;
+export const PIXELS_PER_METER = 16;
+export const CANVAS_MARGIN_X = 20;
+export const CANVAS_MARGIN_Y = 20;
+
+/**
+ * Generate Bézier lane curves from StreetConfig cross-section
+ */
+export function buildNetworkFromConfig(config: StreetConfig, canvasWidth = 960): {
+  lanes: LaneSegment[];
+  totalHeight: number;
+} {
+  const lanes: LaneSegment[] = [];
+  const roadLengthMeters = config.lengthMeters || 60;
+  const curvature = config.curvatureIntensity ?? 0; // -1 to +1
+
+  // Compute y offsets for each lane
+  let currentY = CANVAS_MARGIN_Y;
+  const laneLayouts: Array<{ lane: StreetConfig['lanes'][0]; yCenter: number; heightPx: number }> = [];
+
+  for (const laneDef of config.lanes) {
+    const heightPx = Math.max(24, Math.round(laneDef.width * PIXELS_PER_METER));
+    const yCenter = currentY + heightPx / 2;
+    laneLayouts.push({ lane: laneDef, yCenter, heightPx });
+    currentY += heightPx + 2; // 2px separator
+  }
+
+  const totalHeight = currentY + CANVAS_MARGIN_Y;
+  const leftX = CANVAS_MARGIN_X;
+  const rightX = canvasWidth - CANVAS_MARGIN_X;
+  const roadSpanX = rightX - leftX;
+
+  for (const { lane, yCenter, heightPx } of laneLayouts) {
+    // Generate Bézier control points based on direction and curvature
+    const curveDeflection = curvature * 80; // px displacement for curve
+
+    let p0 = { x: leftX, y: yCenter };
+    let p1 = { x: leftX + roadSpanX / 3, y: yCenter + curveDeflection * 0.8 };
+    let p2 = { x: leftX + (2 * roadSpanX) / 3, y: yCenter + curveDeflection * 0.8 };
+    let p3 = { x: rightX, y: yCenter };
+
+    if (lane.direction === 'reverse') {
+      // Westbound/reverse direction: starts at rightX, goes to leftX
+      p0 = { x: rightX, y: yCenter };
+      p1 = { x: rightX - roadSpanX / 3, y: yCenter + curveDeflection * 0.8 };
+      p2 = { x: leftX + roadSpanX / 3, y: yCenter + curveDeflection * 0.8 };
+      p3 = { x: leftX, y: yCenter };
+    }
+
+    const curve: CubicBezier = { p0, p1, p2, p3 };
+    const lengthPx = approximateBezierLength(curve, 24);
+    const lengthMeters = lengthPx / PIXELS_PER_METER;
+
+    lanes.push({
+      id: lane.id,
+      name: lane.name,
+      type: lane.type,
+      direction: lane.direction,
+      widthMeters: lane.width,
+      renderHeightPx: heightPx,
+      yOffsetPx: yCenter,
+      length: lengthMeters,
+      curve,
+      vehicles: [],
+      nextLanes: [],
+      stopLine: lane.stopLineMeters,
+      speedLimitKmh: lane.speedLimitKmh || 50,
+    });
+  }
+
+  return { lanes, totalHeight };
 }
-
-// -----------------------------------------------------------------------
-// Default cross-section geometry
-// Street width: 800 px canvas, 10 lanes rendered top-to-bottom
-// Each lane is a straight horizontal segment of 800 px (≈ 800 m scaled)
-// -----------------------------------------------------------------------
-const LANE_HEIGHT = 60; // px per lane
-const CANVAS_W = 900;
-const LANE_MARGIN = 10;
-
-function straightLane(y: number, length: number): CubicBezier {
-  const margin = LANE_MARGIN;
-  return {
-    p0: { x: margin, y },
-    p1: { x: margin + length / 3, y },
-    p2: { x: margin + (2 * length) / 3, y },
-    p3: { x: margin + length, y },
-  };
-}
-
-export function buildDefaultNetwork(): LaneSegment[] {
-  const len = CANVAS_W - 2 * LANE_MARGIN;
-  const lanes: LaneSegment[] = [
-    // Eastbound lanes (top → bottom, moving left-to-right)
-    {
-      id: 'sidewalk_eb',
-      type: 'pedestrian',
-      length: len,
-      curve: straightLane(LANE_HEIGHT * 0.5, len),
-      vehicles: [],
-      nextLanes: [],
-    },
-    {
-      id: 'bike_eb',
-      type: 'bike',
-      length: len,
-      curve: straightLane(LANE_HEIGHT * 1.5, len),
-      vehicles: [],
-      nextLanes: [],
-    },
-    {
-      id: 'travel_lane_1',
-      type: 'motor',
-      length: len,
-      curve: straightLane(LANE_HEIGHT * 2.5, len),
-      vehicles: [],
-      nextLanes: [],
-      stopLine: len * 0.85,
-    },
-    {
-      id: 'travel_lane_2',
-      type: 'motor',
-      length: len,
-      curve: straightLane(LANE_HEIGHT * 3.5, len),
-      vehicles: [],
-      nextLanes: [],
-      stopLine: len * 0.85,
-    },
-    // Center turn / transit median
-    {
-      id: 'center_turn_lane',
-      type: 'transit',
-      length: len,
-      curve: straightLane(LANE_HEIGHT * 4.5, len),
-      vehicles: [],
-      nextLanes: [],
-    },
-    // Westbound lanes (moving right-to-left, inverted Bézier)
-    {
-      id: 'travel_lane_wb_1',
-      type: 'motor',
-      length: len,
-      curve: {
-        p0: { x: CANVAS_W - LANE_MARGIN, y: LANE_HEIGHT * 5.5 },
-        p1: { x: CANVAS_W - LANE_MARGIN - len / 3, y: LANE_HEIGHT * 5.5 },
-        p2: { x: LANE_MARGIN + len / 3, y: LANE_HEIGHT * 5.5 },
-        p3: { x: LANE_MARGIN, y: LANE_HEIGHT * 5.5 },
-      },
-      vehicles: [],
-      nextLanes: [],
-      stopLine: len * 0.85,
-    },
-    {
-      id: 'travel_lane_wb_2',
-      type: 'motor',
-      length: len,
-      curve: {
-        p0: { x: CANVAS_W - LANE_MARGIN, y: LANE_HEIGHT * 6.5 },
-        p1: { x: CANVAS_W - LANE_MARGIN - len / 3, y: LANE_HEIGHT * 6.5 },
-        p2: { x: LANE_MARGIN + len / 3, y: LANE_HEIGHT * 6.5 },
-        p3: { x: LANE_MARGIN, y: LANE_HEIGHT * 6.5 },
-      },
-      vehicles: [],
-      nextLanes: [],
-      stopLine: len * 0.85,
-    },
-    {
-      id: 'bike_wb',
-      type: 'bike',
-      length: len,
-      curve: {
-        p0: { x: CANVAS_W - LANE_MARGIN, y: LANE_HEIGHT * 7.5 },
-        p1: { x: CANVAS_W - LANE_MARGIN - len / 3, y: LANE_HEIGHT * 7.5 },
-        p2: { x: LANE_MARGIN + len / 3, y: LANE_HEIGHT * 7.5 },
-        p3: { x: LANE_MARGIN, y: LANE_HEIGHT * 7.5 },
-      },
-      vehicles: [],
-      nextLanes: [],
-    },
-    {
-      id: 'sidewalk_wb',
-      type: 'pedestrian',
-      length: len,
-      curve: {
-        p0: { x: CANVAS_W - LANE_MARGIN, y: LANE_HEIGHT * 8.5 },
-        p1: { x: CANVAS_W - LANE_MARGIN - len / 3, y: LANE_HEIGHT * 8.5 },
-        p2: { x: LANE_MARGIN + len / 3, y: LANE_HEIGHT * 8.5 },
-        p3: { x: LANE_MARGIN, y: LANE_HEIGHT * 8.5 },
-      },
-      vehicles: [],
-      nextLanes: [],
-    },
-  ];
-  return lanes;
-}
-
-export const CANVAS_HEIGHT = LANE_HEIGHT * 10;
-export const CANVAS_WIDTH = CANVAS_W;

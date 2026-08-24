@@ -1,55 +1,83 @@
 'use client';
 
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Engine } from '@/lib/simulation/Engine';
-import { loadSprites } from '@/lib/renderer/SpriteManager';
+import { loadVehicleSprites } from '@/lib/renderer/SpriteManager';
 import { drawRoads } from '@/lib/renderer/RoadRenderer';
-import { evaluateBezier } from '@/lib/simulation/Network';
+import { evaluateBezierFull, PIXELS_PER_METER, LaneSegment } from '@/lib/simulation/Network';
+import { VehicleType, VEHICLE_CONFIGS } from '@/lib/types/vehicle';
+import { LaneDefinition } from '@/lib/types/street';
 
 interface TrafficCanvasProps {
   engine: Engine;
   speedMultiplier: number;
 }
 
+interface HoveredVehicleInfo {
+  id: number;
+  type: VehicleType;
+  speedKmh: number;
+  accel: number;
+  laneName: string;
+  x: number;
+  y: number;
+}
+
 export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const spritesRef = useRef<Record<string, ImageBitmap> | null>(null);
+  const spritesRef = useRef<Record<VehicleType, ImageBitmap> | null>(null);
   const rafRef = useRef<number | null>(null);
   const multiplierRef = useRef(speedMultiplier);
+  const [hoveredVehicle, setHoveredVehicle] = useState<HoveredVehicleInfo | null>(null);
 
-  // Keep ref in sync without restarting loop
   useEffect(() => {
     multiplierRef.current = speedMultiplier;
   }, [speedMultiplier]);
 
-  const render = useCallback(
-    (ctx: CanvasRenderingContext2D, sprites: Record<string, ImageBitmap>) => {
+  const renderFrame = useCallback(
+    (ctx: CanvasRenderingContext2D, sprites: Record<VehicleType, ImageBitmap>) => {
       const canvas = ctx.canvas;
-      const lanes = Array.from(engine.lanes.values());
+      const lanes: LaneSegment[] = Array.from(engine.lanes.values());
       const signals = engine.signals;
+      const intersections = engine.intersections;
 
-      // Advance simulation
+      // 1. Advance simulation physics
       engine.update(multiplierRef.current);
 
-      // Draw static geometry
-      drawRoads(ctx, lanes, signals, canvas.width);
+      // 2. Draw static street pavement, striping, signals & markings
+      drawRoads(ctx, lanes, signals, intersections, canvas.width, canvas.height);
 
-      // Draw vehicles
+      // 3. Draw All Vehicles
       for (const lane of lanes) {
         for (const vehicle of lane.vehicles) {
-          const t = Math.min(1, Math.max(0, vehicle.s / lane.length));
-          const { x, y, angle } = evaluateBezier(lane.curve, t);
+          const t = Math.max(0, Math.min(1, vehicle.s / Math.max(1, lane.length)));
+          const { x, y, angle } = evaluateBezierFull(lane.curve, t);
           const sprite = sprites[vehicle.type];
           if (!sprite) continue;
 
-          const scale = LANE_SCALE[lane.type] ?? 1;
-          const w = sprite.width * scale;
-          const h = sprite.height * scale;
+          // Compute rendered sprite dimension based on physical meters
+          const lengthPx = vehicle.length * PIXELS_PER_METER;
+          const widthPx = vehicle.width * PIXELS_PER_METER;
 
           ctx.save();
           ctx.translate(x, y);
           ctx.rotate(angle);
-          ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+
+          // Draw vehicle bitmap centered
+          ctx.drawImage(sprite, -lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
+
+          // Subtle brake lights indicator when decelerating
+          if (vehicle.a < -0.8) {
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
+            ctx.shadowColor = '#EF4444';
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            ctx.arc(-lengthPx / 2, -widthPx / 3, 2, 0, Math.PI * 2);
+            ctx.arc(-lengthPx / 2, widthPx / 3, 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+          }
+
           ctx.restore();
         }
       }
@@ -65,15 +93,16 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
 
     let cancelled = false;
 
-    loadSprites().then((sprites) => {
+    loadVehicleSprites().then((sprites: Record<VehicleType, ImageBitmap>) => {
       if (cancelled) return;
       spritesRef.current = sprites;
 
-      function loop() {
+      const loop = () => {
         if (cancelled) return;
-        render(ctx!, sprites);
+        renderFrame(ctx, sprites);
         rafRef.current = requestAnimationFrame(loop);
-      }
+      };
+
       rafRef.current = requestAnimationFrame(loop);
     });
 
@@ -81,28 +110,86 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
       cancelled = true;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [render]);
+  }, [renderFrame]);
 
-  // Pointer events for panning / zooming (viewport scaling placeholder)
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-  }, []);
+  // Mouse hover inspection
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mouseX = (e.clientX - rect.left) * scaleX;
+    const mouseY = (e.clientY - rect.top) * scaleY;
+
+    let found: HoveredVehicleInfo | null = null;
+
+    for (const lane of engine.lanes.values()) {
+      for (const v of lane.vehicles) {
+        const t = Math.max(0, Math.min(1, v.s / Math.max(1, lane.length)));
+        const { x, y } = evaluateBezierFull(lane.curve, t);
+        const dist = Math.hypot(mouseX - x, mouseY - y);
+        if (dist < 18) {
+          found = {
+            id: v.id,
+            type: v.type,
+            speedKmh: v.v * 3.6,
+            accel: v.a,
+            laneName: lane.name,
+            x: e.clientX,
+            y: e.clientY,
+          };
+          break;
+        }
+      }
+      if (found) break;
+    }
+
+    setHoveredVehicle(found);
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredVehicle(null);
+  };
+
+  // Compute dynamic canvas height based on lane layout
+  const totalLanesHeightPx = engine.streetConfig.lanes.reduce(
+    (sum: number, l: LaneDefinition) => sum + Math.max(24, Math.round(l.width * PIXELS_PER_METER)) + 2,
+    60,
+  );
+  const canvasHeight = Math.max(480, totalLanesHeightPx + 40);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={900}
-      height={600}
-      style={{ display: 'block', width: '100%', maxWidth: 900, background: '#111827', borderRadius: 8 }}
-      onWheel={handleWheel}
-    />
+    <div className="traffic-canvas-wrapper">
+      <canvas
+        ref={canvasRef}
+        width={980}
+        height={canvasHeight}
+        className="traffic-canvas"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      />
+
+      {/* Tooltip on Hover */}
+      {hoveredVehicle && (
+        <div
+          className="vehicle-tooltip"
+          style={{ left: hoveredVehicle.x + 12, top: hoveredVehicle.y - 40 }}
+        >
+          <div className="tooltip-title">
+            {VEHICLE_CONFIGS[hoveredVehicle.type]?.label} #{hoveredVehicle.id}
+          </div>
+          <div className="tooltip-row">
+            <span>Speed:</span> <strong>{hoveredVehicle.speedKmh.toFixed(1)} km/h</strong>
+          </div>
+          <div className="tooltip-row">
+            <span>Accel:</span> <strong>{hoveredVehicle.accel.toFixed(2)} m/s²</strong>
+          </div>
+          <div className="tooltip-row">
+            <span>Lane:</span> <span>{hoveredVehicle.laneName}</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
-
-const LANE_SCALE: Record<string, number> = {
-  motor: 1.0,
-  bus: 1.0,
-  bike: 0.8,
-  pedestrian: 0.6,
-  transit: 1.0,
-};

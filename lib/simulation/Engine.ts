@@ -1,177 +1,518 @@
-// Fixed-timestep simulation engine orchestrating signals, spawning, and vehicle physics
+// Unified Fixed-Timestep Multi-Modal Simulation Engine
 
-import { Vehicle, VehicleType } from './Vehicle';
-import { LaneSegment, SpawnProfile, buildDefaultNetwork } from './Network';
+import { Vehicle } from './Vehicle';
+import { LaneSegment, buildNetworkFromConfig, evaluateBezierFull } from './Network';
 import { TrafficSignal } from './TrafficSignal';
+import { DemandManager, DEFAULT_DIURNAL_PROFILE } from './DemandManager';
+import {
+  StreetConfig,
+  IntersectionConfig,
+  PlayFile,
+} from '../types/street';
+import { SimulationTelemetry, SimulationClock } from '../types/simulation';
+import { VehicleType, VEHICLE_CONFIGS } from '../types/vehicle';
 
-export const FIXED_DT = 1 / 60;
-
-export interface EngineConfig {
-  /** vehicles per second per spawn profile */
-  demandRates: Partial<Record<string, number>>;
-}
+export const FIXED_DT = 1 / 60; // 60 Hz physics
 
 export class Engine {
+  streetConfig: StreetConfig;
+  intersections: IntersectionConfig[];
   lanes: Map<string, LaneSegment>;
   signals: TrafficSignal[];
-  spawnProfiles: SpawnProfile[];
+  demandManager: DemandManager;
+  clock: SimulationClock;
 
-  constructor(config?: EngineConfig) {
-    const laneList = buildDefaultNetwork();
-    this.lanes = new Map(laneList.map((l) => [l.id, l]));
+  // Telemetry accumulators
+  completedTripsCount: number;
+  totalTravelTimeAccum: number;
+  recentTripSpeeds: number[];
+  recentThroughputLog: { time: number; count: number }[];
 
-    // Default traffic signals covering motor vehicle lanes
-    this.signals = [
-      new TrafficSignal('main', [
-        {
-          name: 'EB_Green',
-          greenLanes: ['travel_lane_1', 'travel_lane_2'],
-          duration: 30,
-        },
-        {
-          name: 'All_Red',
-          greenLanes: [],
-          duration: 3,
-        },
-        {
-          name: 'WB_Green',
-          greenLanes: ['travel_lane_wb_1', 'travel_lane_wb_2'],
-          duration: 30,
-        },
-        {
-          name: 'All_Red_2',
-          greenLanes: [],
-          duration: 3,
-        },
-      ]),
-    ];
+  constructor(initialPlayFile?: PlayFile) {
+    this.completedTripsCount = 0;
+    this.totalTravelTimeAccum = 0;
+    this.recentTripSpeeds = [];
+    this.recentThroughputLog = [];
 
-    // Default spawn profiles
-    const defaultRates: Record<string, { type: VehicleType; rate: number }> = {
-      sidewalk_eb: { type: 'pedestrian', rate: 0.3 },
-      sidewalk_wb: { type: 'pedestrian', rate: 0.3 },
-      bike_eb: { type: 'bike', rate: 0.2 },
-      bike_wb: { type: 'bike', rate: 0.2 },
-      travel_lane_1: { type: 'car', rate: 0.3 },
-      travel_lane_2: { type: 'car', rate: 0.25 },
-      center_turn_lane: { type: 'bus', rate: 0.05 },
-      travel_lane_wb_1: { type: 'car', rate: 0.3 },
-      travel_lane_wb_2: { type: 'car', rate: 0.25 },
+    this.clock = {
+      timeOfDayHours: initialPlayFile?.initialTimeOfDayHours ?? 8.0, // 8:00 AM default
+      isPaused: false,
+      speedMultiplier: 1,
+      elapsedSeconds: 0,
     };
 
-    this.spawnProfiles = Object.entries(defaultRates).map(([laneId, { type, rate }]) => ({
-      laneId,
-      vehicleType: type,
-      rate: config?.demandRates?.[laneId] ?? rate,
-      _accumulator: Math.random(), // stagger initial spawns
-    }));
-  }
+    if (initialPlayFile) {
+      this.streetConfig = initialPlayFile.street;
+      this.intersections = initialPlayFile.intersections;
+      const { lanes } = buildNetworkFromConfig(this.streetConfig);
+      this.lanes = new Map(lanes.map((l) => [l.id, l]));
 
-  /** Update demand rates at runtime */
-  setDemandRate(laneId: string, rate: number): void {
-    const profile = this.spawnProfiles.find((p) => p.laneId === laneId);
-    if (profile) profile.rate = rate;
-  }
+      this.signals = this.intersections
+        .filter((i) => i.type === 'lights')
+        .map((i) => new TrafficSignal(i.id, i.name, i.signalPhases || []));
 
-  /** Update signal phase duration at runtime */
-  setSignalPhaseDuration(signalId: string, phaseIndex: number, duration: number): void {
-    const signal = this.signals.find((s) => s.id === signalId);
-    if (signal && signal.phases[phaseIndex]) {
-      signal.phases[phaseIndex].duration = duration;
+      this.demandManager = new DemandManager(
+        initialPlayFile.ingressPoints,
+        initialPlayFile.outgressPoints,
+        initialPlayFile.demandRoutes,
+        initialPlayFile.timeOfDayProfile || DEFAULT_DIURNAL_PROFILE,
+      );
+    } else {
+      // Create sensible default Complete Street layout
+      this.streetConfig = Engine.createDefaultStreet();
+      this.intersections = Engine.createDefaultIntersections(this.streetConfig);
+      const { lanes } = buildNetworkFromConfig(this.streetConfig);
+      this.lanes = new Map(lanes.map((l) => [l.id, l]));
+
+      this.signals = this.intersections
+        .filter((i) => i.type === 'lights')
+        .map((i) => new TrafficSignal(i.id, i.name, i.signalPhases || []));
+
+      const { ingress, outgress, routes } = Engine.createDefaultDemand(this.streetConfig);
+      this.demandManager = new DemandManager(ingress, outgress, routes, DEFAULT_DIURNAL_PROFILE);
     }
   }
 
-  private updateSignals(dt: number): void {
+  /**
+   * Rebuild the entire simulation network from updated street and intersection configs.
+   * Preserves existing vehicles if their lanes still exist.
+   */
+  rebuildNetwork(street: StreetConfig, intersections: IntersectionConfig[]): void {
+    this.streetConfig = street;
+    this.intersections = intersections;
+
+    const oldVehiclesByLane = new Map<string, Vehicle[]>();
+    for (const [id, lane] of this.lanes.entries()) {
+      oldVehiclesByLane.set(id, lane.vehicles);
+    }
+
+    const { lanes } = buildNetworkFromConfig(street);
+    this.lanes = new Map();
+    for (const lane of lanes) {
+      // Restore existing vehicles if lane was retained
+      if (oldVehiclesByLane.has(lane.id)) {
+        lane.vehicles = oldVehiclesByLane.get(lane.id) || [];
+      }
+      this.lanes.set(lane.id, lane);
+    }
+
+    // Rebuild signals
+    this.signals = intersections
+      .filter((i) => i.type === 'lights')
+      .map((i) => {
+        const existing = this.signals.find((s) => s.id === i.id);
+        if (existing && i.signalPhases && i.signalPhases.length > 0) {
+          existing.phases = i.signalPhases;
+          return existing;
+        }
+        return new TrafficSignal(i.id, i.name, i.signalPhases || []);
+      });
+  }
+
+  /**
+   * Reset simulation vehicles and telemetry metrics
+   */
+  resetSimulation(): void {
+    for (const lane of this.lanes.values()) {
+      lane.vehicles = [];
+    }
+    this.completedTripsCount = 0;
+    this.totalTravelTimeAccum = 0;
+    this.recentTripSpeeds = [];
+    this.recentThroughputLog = [];
+    this.clock.elapsedSeconds = 0;
+  }
+
+  /**
+   * Single physics tick
+   */
+  private stepPhysics(dt: number): void {
+    // 1. Advance signals
     for (const signal of this.signals) {
       signal.update(dt);
     }
-  }
 
-  private isLaneGreen(laneId: string): boolean {
-    for (const signal of this.signals) {
-      // Only motor lanes are signal-controlled
-      if (signal.currentPhase.greenLanes.length > 0) {
-        if (signal.currentPhase.greenLanes.includes(laneId)) return true;
-        // If the signal controls this lane type and it's not in greenLanes, it's red
-        const motorLanes = new Set(
-          signal.phases.flatMap((p) => p.greenLanes),
-        );
-        if (motorLanes.has(laneId)) return false;
-      }
-    }
-    // Not signal-controlled → always green
-    return true;
-  }
+    // 2. Advance time of day clock (e.g. 1 simulated second = 1 second in time of day)
+    this.clock.elapsedSeconds += dt;
+    this.clock.timeOfDayHours = (this.clock.timeOfDayHours + dt / 3600) % 24;
 
-  private spawnDemand(dt: number): void {
-    for (const profile of this.spawnProfiles) {
-      profile._accumulator += profile.rate * dt;
-      while (profile._accumulator >= 1) {
-        profile._accumulator -= 1;
-        this.spawnVehicle(profile.laneId, profile.vehicleType);
-      }
-    }
-  }
+    // 3. Spawn demand
+    this.demandManager.step(dt, this.clock.timeOfDayHours, this.lanes, this.clock.elapsedSeconds);
 
-  private spawnVehicle(laneId: string, type: VehicleType): void {
-    const lane = this.lanes.get(laneId);
-    if (!lane) return;
+    // 4. Update vehicles in all lanes
+    const activeIntersection = this.intersections[0]; // primary intersection along this segment
 
-    // Check clearance at spawn point (s=0)
-    const minGap = 6;
-    if (lane.vehicles.length > 0) {
-      const last = lane.vehicles[lane.vehicles.length - 1];
-      if (last.s < minGap) return; // too close to spawn
-    }
-
-    const v = new Vehicle({ type, laneId, s: 0, v: 0 });
-    lane.vehicles.push(v);
-  }
-
-  private stepVehicles(dt: number): void {
     for (const lane of this.lanes.values()) {
-      const isGreen = this.isLaneGreen(lane.id);
-      const stopS = lane.stopLine;
-
-      // Vehicles are stored ascending by s (front-of-queue last isn't guaranteed — sort first)
+      // Sort vehicles ascending by position s
       lane.vehicles.sort((a, b) => a.s - b.s);
+
+      // Determine signal/stop state for this lane
+      let laneSignalState: 'green' | 'yellow' | 'red' = 'green';
+      for (const signal of this.signals) {
+        laneSignalState = signal.getSignalStateForLane(lane.id);
+        if (laneSignalState !== 'green') break;
+      }
+
+      // Base design speed for this lane (in m/s)
+      const baseLaneSpeedMs = (lane.speedLimitKmh || 50) / 3.6;
 
       for (let i = 0; i < lane.vehicles.length; i++) {
         const v = lane.vehicles[i];
-        let sLead = Infinity;
-        let vLead = v.v0;
+        const tPos = Math.max(0, Math.min(1, v.s / Math.max(1, lane.length)));
 
-        // Leader is next vehicle in sorted array (higher s)
+        // Calculate local curve safe speed
+        const curveEval = evaluateBezierFull(lane.curve, tPos);
+        const curveSafeSpeed = curveEval.maxSafeSpeed;
+
+        // Effective target speed: min(v0, laneSpeed, curveSafeSpeed)
+        const targetSpeed = Math.min(v.v0, baseLaneSpeedMs, curveSafeSpeed);
+
+        // Leader vehicle
+        let sLead = Infinity;
+        let vLead = targetSpeed;
+
         if (i + 1 < lane.vehicles.length) {
           const leader = lane.vehicles[i + 1];
           sLead = leader.s;
           vLead = leader.v;
         }
 
-        // Virtual stop-line obstacle when red
-        if (!isGreen && stopS !== undefined && v.s < stopS) {
-          const stopObstacleFront = stopS;
-          if (stopObstacleFront < sLead) {
-            sLead = stopObstacleFront;
-            vLead = 0;
+        // Virtual stop line obstacle (for red lights or stop signs)
+        if (lane.stopLine !== undefined && v.s < lane.stopLine) {
+          const stopLineS = lane.stopLine;
+
+          if (activeIntersection?.type === 'lights') {
+            // Signal light stop line
+            if (laneSignalState === 'red' || (laneSignalState === 'yellow' && v.s < stopLineS - 15)) {
+              if (stopLineS < sLead) {
+                sLead = stopLineS;
+                vLead = 0;
+              }
+            }
+          } else if (activeIntersection?.type === 'stop') {
+            // Stop sign intersection
+            const isAtStop = v.s >= stopLineS - 2.5 && v.s <= stopLineS + 1.0;
+            const mustStop = v.updateStopState(dt, isAtStop, activeIntersection.stopDwellSeconds ?? 2.0);
+
+            if (mustStop && stopLineS < sLead) {
+              sLead = stopLineS;
+              vLead = 0;
+            }
           }
         }
 
-        const acc = v.computeAcceleration(sLead, vLead);
+        const acc = v.computeAcceleration(sLead, vLead, targetSpeed);
         v.integrate(dt, acc);
       }
 
-      // Remove vehicles that have exited the lane
-      lane.vehicles = lane.vehicles.filter((v) => v.s < lane.length + v.length);
+      // Filter out vehicles that have exited the lane segment
+      const exiting: Vehicle[] = [];
+      lane.vehicles = lane.vehicles.filter((v) => {
+        if (v.s >= lane.length) {
+          exiting.push(v);
+          return false;
+        }
+        return true;
+      });
+
+      // Record completed trip metrics
+      for (const ex of exiting) {
+        this.completedTripsCount++;
+        const travelTime = Math.max(1, this.clock.elapsedSeconds - ex.spawnTime);
+        this.totalTravelTimeAccum += travelTime;
+        const avgSpeed = (ex.distanceTraveled / travelTime) * 3.6; // km/h
+        this.recentTripSpeeds.push(avgSpeed);
+        if (this.recentTripSpeeds.length > 50) this.recentTripSpeeds.shift();
+
+        this.recentThroughputLog.push({
+          time: this.clock.elapsedSeconds,
+          count: 1,
+        });
+      }
+    }
+
+    // Prune throughput log older than 60 seconds
+    const cutoff = this.clock.elapsedSeconds - 60;
+    this.recentThroughputLog = this.recentThroughputLog.filter((log) => log.time >= cutoff);
+  }
+
+  /**
+   * Advance simulation by multiplier ticks
+   */
+  update(multiplier = 1): void {
+    if (this.clock.isPaused) return;
+    const ticks = Math.max(1, Math.min(20, Math.round(multiplier)));
+    for (let i = 0; i < ticks; i++) {
+      this.stepPhysics(FIXED_DT);
     }
   }
 
-  /** Run `multiplier` simulation ticks */
-  update(multiplier: number): void {
-    for (let i = 0; i < multiplier; i++) {
-      this.updateSignals(FIXED_DT);
-      this.spawnDemand(FIXED_DT);
-      this.stepVehicles(FIXED_DT);
+  /**
+   * Get real-time telemetry metrics
+   */
+  getTelemetry(): SimulationTelemetry {
+    let activeCount = 0;
+    const byType: Record<VehicleType, number> = {
+      walker: 0,
+      bike: 0,
+      car: 0,
+      truck: 0,
+      delivery: 0,
+      bus: 0,
+      semi: 0,
+    };
+
+    let totalSpeedSum = 0;
+
+    for (const lane of this.lanes.values()) {
+      for (const v of lane.vehicles) {
+        activeCount++;
+        byType[v.type] = (byType[v.type] || 0) + 1;
+        totalSpeedSum += v.v * 3.6; // km/h
+      }
     }
+
+    const throughputPerHour = this.recentThroughputLog.length * 60; // extrapolated hourly flow
+    const avgSpeed = activeCount > 0 ? totalSpeedSum / activeCount : 0;
+    const avgTravelTime =
+      this.completedTripsCount > 0
+        ? this.totalTravelTimeAccum / this.completedTripsCount
+        : 0;
+
+    // Congestion index: ratio of average speed to expected free-flow (50 km/h)
+    const congestionIndex = Math.max(
+      0,
+      Math.min(1.0, 1.0 - (activeCount > 0 ? avgSpeed / 45 : 1.0)),
+    );
+
+    return {
+      activeVehiclesCount: activeCount,
+      vehiclesByType: byType,
+      throughputPerHour,
+      averageSpeedKmh: avgSpeed,
+      totalCompletedTrips: this.completedTripsCount,
+      averageTravelTimeSeconds: avgTravelTime,
+      congestionIndex,
+    };
+  }
+
+  // --- Default Scenario Constructors ---
+
+  static createDefaultStreet(): StreetConfig {
+    return {
+      id: 'street_downtown_main',
+      name: 'Downtown Complete Street',
+      streetType: 'arterial',
+      lengthMeters: 80,
+      curvatureIntensity: 0.15, // gentle curve
+      lanes: [
+        {
+          id: 'sidewalk_eb',
+          name: 'North Sidewalk',
+          type: 'sidewalk',
+          width: 2.5,
+          direction: 'forward',
+          speedLimitKmh: 5,
+        },
+        {
+          id: 'bike_eb',
+          name: 'Protected Bike Lane EB',
+          type: 'bike',
+          width: 2.0,
+          direction: 'forward',
+          speedLimitKmh: 20,
+        },
+        {
+          id: 'travel_eb_1',
+          name: 'Travel Lane EB 1',
+          type: 'motor',
+          width: 3.2,
+          direction: 'forward',
+          speedLimitKmh: 45,
+          stopLineMeters: 65,
+        },
+        {
+          id: 'travel_eb_2',
+          name: 'Travel Lane EB 2',
+          type: 'motor',
+          width: 3.2,
+          direction: 'forward',
+          speedLimitKmh: 45,
+          stopLineMeters: 65,
+        },
+        {
+          id: 'center_transit',
+          name: 'Dedicated Bus Rapid Transit',
+          type: 'transit',
+          width: 3.5,
+          direction: 'forward',
+          speedLimitKmh: 40,
+        },
+        {
+          id: 'travel_wb_1',
+          name: 'Travel Lane WB 1',
+          type: 'motor',
+          width: 3.2,
+          direction: 'reverse',
+          speedLimitKmh: 45,
+          stopLineMeters: 65,
+        },
+        {
+          id: 'travel_wb_2',
+          name: 'Travel Lane WB 2',
+          type: 'motor',
+          width: 3.2,
+          direction: 'reverse',
+          speedLimitKmh: 45,
+          stopLineMeters: 65,
+        },
+        {
+          id: 'bike_wb',
+          name: 'Protected Bike Lane WB',
+          type: 'bike',
+          width: 2.0,
+          direction: 'reverse',
+          speedLimitKmh: 20,
+        },
+        {
+          id: 'sidewalk_wb',
+          name: 'South Sidewalk',
+          type: 'sidewalk',
+          width: 2.5,
+          direction: 'reverse',
+          speedLimitKmh: 5,
+        },
+      ],
+    };
+  }
+
+  static createDefaultIntersections(street: StreetConfig): IntersectionConfig[] {
+    const forwardMotor = street.lanes
+      .filter((l) => l.type === 'motor' && l.direction === 'forward')
+      .map((l) => l.id);
+    const reverseMotor = street.lanes
+      .filter((l) => l.type === 'motor' && l.direction === 'reverse')
+      .map((l) => l.id);
+
+    return [
+      {
+        id: 'signal_intersection_1',
+        name: '4th Avenue Cross-Street Signal',
+        type: 'lights',
+        positionMeters: 65,
+        signalPattern: 'NS_EW_STANDARD',
+        signalPhases: [
+          {
+            id: 'phase_eb',
+            name: 'Eastbound Green',
+            greenLaneIds: forwardMotor,
+            greenDuration: 25,
+            yellowDuration: 3,
+            allRedDuration: 2,
+          },
+          {
+            id: 'phase_wb',
+            name: 'Westbound Green',
+            greenLaneIds: reverseMotor,
+            greenDuration: 25,
+            yellowDuration: 3,
+            allRedDuration: 2,
+          },
+        ],
+      },
+    ];
+  }
+
+  static createDefaultDemand(street: StreetConfig) {
+    const ingress = street.lanes.map((l) => ({
+      id: `ingress_${l.id}`,
+      name: `Enter ${l.name}`,
+      laneId: l.id,
+      positionMeters: 0,
+    }));
+
+    const outgress = street.lanes.map((l) => ({
+      id: `outgress_${l.id}`,
+      name: `Exit ${l.name}`,
+      laneId: l.id,
+      positionMeters: 80,
+    }));
+
+    const routes = [
+      {
+        id: 'route_ped_eb',
+        name: 'Pedestrians North Walkway',
+        originIngressId: 'ingress_sidewalk_eb',
+        destinationOutgressId: 'outgress_sidewalk_eb',
+        vehicleType: 'walker' as VehicleType,
+        baseRatePerMinute: 18,
+      },
+      {
+        id: 'route_ped_wb',
+        name: 'Pedestrians South Walkway',
+        originIngressId: 'ingress_sidewalk_wb',
+        destinationOutgressId: 'outgress_sidewalk_wb',
+        vehicleType: 'walker' as VehicleType,
+        baseRatePerMinute: 18,
+      },
+      {
+        id: 'route_bike_eb',
+        name: 'Commuter Cyclists EB',
+        originIngressId: 'ingress_bike_eb',
+        destinationOutgressId: 'outgress_bike_eb',
+        vehicleType: 'bike' as VehicleType,
+        baseRatePerMinute: 12,
+      },
+      {
+        id: 'route_bike_wb',
+        name: 'Commuter Cyclists WB',
+        originIngressId: 'ingress_bike_wb',
+        destinationOutgressId: 'outgress_bike_wb',
+        vehicleType: 'bike' as VehicleType,
+        baseRatePerMinute: 12,
+      },
+      {
+        id: 'route_car_eb1',
+        name: 'Cars Eastbound #1',
+        originIngressId: 'ingress_travel_eb_1',
+        destinationOutgressId: 'outgress_travel_eb_1',
+        vehicleType: 'car' as VehicleType,
+        baseRatePerMinute: 16,
+      },
+      {
+        id: 'route_car_eb2',
+        name: 'Cars / Trucks EB #2',
+        originIngressId: 'ingress_travel_eb_2',
+        destinationOutgressId: 'outgress_travel_eb_2',
+        vehicleType: 'truck' as VehicleType,
+        baseRatePerMinute: 14,
+      },
+      {
+        id: 'route_bus',
+        name: 'Transit Bus Line',
+        originIngressId: 'ingress_center_transit',
+        destinationOutgressId: 'outgress_center_transit',
+        vehicleType: 'bus' as VehicleType,
+        baseRatePerMinute: 4,
+      },
+      {
+        id: 'route_car_wb1',
+        name: 'Delivery Vans WB #1',
+        originIngressId: 'ingress_travel_wb_1',
+        destinationOutgressId: 'outgress_travel_wb_1',
+        vehicleType: 'delivery' as VehicleType,
+        baseRatePerMinute: 12,
+      },
+      {
+        id: 'route_semi_wb2',
+        name: 'Commercial Semis WB #2',
+        originIngressId: 'ingress_travel_wb_2',
+        destinationOutgressId: 'outgress_travel_wb_2',
+        vehicleType: 'semi' as VehicleType,
+        baseRatePerMinute: 6,
+      },
+    ];
+
+    return { ingress, outgress, routes };
   }
 }
