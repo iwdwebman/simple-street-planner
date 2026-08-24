@@ -130,6 +130,7 @@ export class Engine {
     const activeIntersection = this.intersections[0];
 
     for (const lane of this.lanes.values()) {
+      // Sort vehicles ascending by position s
       lane.vehicles.sort((a, b) => a.s - b.s);
 
       // Determine signal/stop state for this lane
@@ -160,24 +161,43 @@ export class Engine {
           vLead = leader.v;
         }
 
-        // Virtual stop line obstacle (for red lights or stop signs)
-        if (lane.stopLine !== undefined && v.s < lane.stopLine) {
+        // Strict Stop Line & Signal Gate (Applies to all vehicles, bikes, and walkers!)
+        if (lane.stopLine !== undefined) {
           const stopLineS = lane.stopLine;
 
           if (activeIntersection?.type === 'lights') {
-            if (laneSignalState === 'red' || (laneSignalState === 'yellow' && v.s < stopLineS - 15)) {
-              if (stopLineS < sLead) {
-                sLead = stopLineS;
-                vLead = 0;
+            const isStopLight = laneSignalState === 'red' || (laneSignalState === 'yellow' && v.s < stopLineS - 10);
+
+            if (isStopLight) {
+              // If approaching stop line or stopped at curb
+              if (v.s < stopLineS + 1.2) {
+                if (stopLineS < sLead) {
+                  sLead = stopLineS;
+                  vLead = 0;
+                }
+
+                // Rigid barrier: prevent slipping/drifting past the stop line on Red
+                if (v.s >= stopLineS - 0.4 && v.s <= stopLineS + 1.2) {
+                  v.v = 0;
+                  v.a = 0;
+                  v.s = stopLineS - 0.4;
+                }
               }
             }
           } else if (activeIntersection?.type === 'stop') {
             const isAtStop = v.s >= stopLineS - 2.5 && v.s <= stopLineS + 1.0;
             const mustStop = v.updateStopState(dt, isAtStop, activeIntersection.stopDwellSeconds ?? 2.0);
 
-            if (mustStop && stopLineS < sLead) {
-              sLead = stopLineS;
-              vLead = 0;
+            if (mustStop) {
+              if (stopLineS < sLead) {
+                sLead = stopLineS;
+                vLead = 0;
+              }
+              if (v.s >= stopLineS - 0.4 && v.s <= stopLineS + 1.0) {
+                v.v = 0;
+                v.a = 0;
+                v.s = stopLineS - 0.4;
+              }
             }
           }
         }
@@ -249,7 +269,7 @@ export class Engine {
       for (const v of lane.vehicles) {
         activeCount++;
         byType[v.type] = (byType[v.type] || 0) + 1;
-        totalSpeedSum += v.v * 3.6; // km/h
+        totalSpeedSum += v.v * 3.6;
       }
     }
 
