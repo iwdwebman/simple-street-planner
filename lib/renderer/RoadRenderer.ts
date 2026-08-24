@@ -25,7 +25,7 @@ export function drawRoads(
   worldWidth: number,
   worldHeight: number,
 ): void {
-  // 1. Clear / Background Landscape (Grid background)
+  // 1. Clear / Background Landscape (Terrain Grid)
   ctx.fillStyle = '#090D16'; // Deep space midnight slate
   ctx.fillRect(0, 0, worldWidth, worldHeight);
 
@@ -51,14 +51,17 @@ export function drawRoads(
   const centerX = worldWidth / 2;
   const centerY = worldHeight / 2;
 
-  // 2. Draw Lane Pavement Surfaces (Horizontal & Vertical)
-  for (const lane of lanes) {
+  // 2. Draw Lane Pavement Surfaces (Horizontal & Vertical through corridors)
+  const throughLanes = lanes.filter((l) => l.orientation !== 'turn');
+  const turningLanes = lanes.filter((l) => l.orientation === 'turn');
+
+  for (const lane of throughLanes) {
     const halfH = lane.renderHeightPx / 2;
     ctx.fillStyle = LANE_ASPHALT_COLORS[lane.type] || '#1E293B';
 
     ctx.beginPath();
     const steps = 30;
-    // Top / Left boundary
+    // Boundary 1
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const pt = evaluateBezierFull(lane.curve, t);
@@ -68,7 +71,7 @@ export function drawRoads(
       if (i === 0) ctx.moveTo(ox, oy);
       else ctx.lineTo(ox, oy);
     }
-    // Bottom / Right boundary in reverse
+    // Boundary 2 in reverse
     for (let i = steps; i >= 0; i--) {
       const t = i / steps;
       const pt = evaluateBezierFull(lane.curve, t);
@@ -149,11 +152,26 @@ export function drawRoads(
   const coreHalfSize = 130;
   ctx.fillRect(centerX - coreHalfSize, centerY - coreHalfSize, coreHalfSize * 2, coreHalfSize * 2);
 
-  // 4. Draw Lane Dividers & Center Stripes
-  for (let idx = 0; idx < lanes.length; idx++) {
-    const lane = lanes[idx];
+  // Draw Subtle Curved Guide Lines for Turning Lanes in Crossroads
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 10]);
+  for (const tLane of turningLanes) {
+    ctx.beginPath();
+    for (let i = 0; i <= 20; i++) {
+      const pt = evaluateBezierFull(tLane.curve, i / 20);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // 4. Draw Lane Dividers & Center Stripes (Through lanes)
+  for (let idx = 0; idx < throughLanes.length; idx++) {
+    const lane = throughLanes[idx];
     const halfH = lane.renderHeightPx / 2;
-    const nextLane = lanes[idx + 1];
+    const nextLane = throughLanes[idx + 1];
 
     if (nextLane && lane.orientation === nextLane.orientation) {
       const isOpposing = lane.direction !== nextLane.direction;
@@ -229,10 +247,10 @@ export function drawRoads(
     }
   }
 
-  // 5. Draw Intersection Stop Lines, Crosswalks, and Signals
+  // 5. Draw Intersection Approach Stop Bars & Zebra Crosswalks
   const primaryIntersection = intersections[0];
 
-  for (const lane of lanes) {
+  for (const lane of throughLanes) {
     if (lane.stopLine !== undefined) {
       const t = Math.max(0, Math.min(1, lane.stopLine / lane.length));
       const pt = evaluateBezierFull(lane.curve, t);
@@ -254,8 +272,9 @@ export function drawRoads(
           ? '#FACC15'
           : '#22C55E';
 
+      // Draw thick stop line across lane
       ctx.strokeStyle = stopLineColor;
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 4.5;
       ctx.beginPath();
       if (lane.orientation === 'vertical') {
         ctx.moveTo(pt.x - halfH, pt.y);
@@ -279,48 +298,109 @@ export function drawRoads(
           ctx.fillRect(pt.x + offset, cy, 8, 4);
         }
       }
-
-      // Traffic Light Head Box
-      if (primaryIntersection?.type === 'lights') {
-        let boxX = pt.x + (lane.direction === 'reverse' ? -22 : 6);
-        let boxY = pt.y - 12;
-        if (lane.orientation === 'vertical') {
-          boxX = pt.x - 8;
-          boxY = pt.y + (lane.direction === 'reverse' ? 8 : -26);
-        }
-
-        ctx.fillStyle = '#0F172A';
-        ctx.strokeStyle = '#334155';
-        ctx.lineWidth = 1;
-        ctx.fillRect(boxX, boxY, 16, 24);
-        ctx.strokeRect(boxX, boxY, 16, 24);
-
-        // Red
-        ctx.beginPath();
-        ctx.arc(boxX + 8, boxY + 5, 2.8, 0, Math.PI * 2);
-        ctx.fillStyle = lightColor === 'red' ? '#EF4444' : '#450A0A';
-        ctx.fill();
-
-        // Yellow
-        ctx.beginPath();
-        ctx.arc(boxX + 8, boxY + 12, 2.8, 0, Math.PI * 2);
-        ctx.fillStyle = lightColor === 'yellow' ? '#FACC15' : '#422006';
-        ctx.fill();
-
-        // Green
-        ctx.beginPath();
-        ctx.arc(boxX + 8, boxY + 19, 2.8, 0, Math.PI * 2);
-        ctx.fillStyle = lightColor === 'green' ? '#22C55E' : '#052E16';
-        ctx.fill();
-      }
     }
   }
 
-  // 6. Draw Glowing 4-Side Perimeter Ingress & Outgress Portals
+  // 6. Draw 4 Master Traffic Signal Mast Heads at the 4 Approach Corners
+  if (primaryIntersection?.type === 'lights' && signals.length > 0) {
+    const sig = signals[0];
+
+    // Determine approach state
+    const ebState = sig.getSignalStateForLane('travel_eb_1');
+    const wbState = sig.getSignalStateForLane('travel_wb_1');
+    const sbState = sig.getSignalStateForLane('ns_travel_sb');
+    const nbState = sig.getSignalStateForLane('ns_travel_nb');
+
+    // West Approach Signal (facing EB traffic)
+    drawSignalHead(ctx, centerX - coreHalfSize - 14, centerY - 60, ebState, 'vertical');
+    // East Approach Signal (facing WB traffic)
+    drawSignalHead(ctx, centerX + coreHalfSize + 14, centerY + 60, wbState, 'vertical');
+    // North Approach Signal (facing SB traffic)
+    drawSignalHead(ctx, centerX + 60, centerY - coreHalfSize - 14, sbState, 'horizontal');
+    // South Approach Signal (facing NB traffic)
+    drawSignalHead(ctx, centerX - 60, centerY + coreHalfSize + 14, nbState, 'horizontal');
+  }
+
+  // 7. Draw Glowing 4-Side Perimeter Ingress & Outgress Portals
   drawPortalBadge(ctx, 40, centerY, 'WEST PORTAL', 'Ingress (EB) · Outgress (WB)', '#3B82F6', 'left');
   drawPortalBadge(ctx, worldWidth - 40, centerY, 'EAST PORTAL', 'Ingress (WB) · Outgress (EB)', '#10B981', 'right');
   drawPortalBadge(ctx, centerX, 40, 'NORTH PORTAL', 'Ingress (SB) · Outgress (NB)', '#F59E0B', 'top');
   drawPortalBadge(ctx, centerX, worldHeight - 40, 'SOUTH PORTAL', 'Ingress (NB) · Outgress (SB)', '#8B5CF6', 'bottom');
+}
+
+function drawSignalHead(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: 'green' | 'yellow' | 'red',
+  layout: 'vertical' | 'horizontal',
+): void {
+  ctx.save();
+  ctx.fillStyle = '#0F172A';
+  ctx.strokeStyle = '#475569';
+  ctx.lineWidth = 1.5;
+
+  if (layout === 'vertical') {
+    const w = 18;
+    const h = 42;
+    ctx.fillRect(x - w / 2, y - h / 2, w, h);
+    ctx.strokeRect(x - w / 2, y - h / 2, w, h);
+
+    // Red
+    ctx.beginPath();
+    ctx.arc(x, y - 12, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'red' ? '#EF4444' : '#450A0A';
+    if (color === 'red') { ctx.shadowColor = '#EF4444'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Yellow
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'yellow' ? '#FACC15' : '#422006';
+    if (color === 'yellow') { ctx.shadowColor = '#FACC15'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Green
+    ctx.beginPath();
+    ctx.arc(x, y + 12, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'green' ? '#22C55E' : '#052E16';
+    if (color === 'green') { ctx.shadowColor = '#22C55E'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  } else {
+    const w = 42;
+    const h = 18;
+    ctx.fillRect(x - w / 2, y - h / 2, w, h);
+    ctx.strokeRect(x - w / 2, y - h / 2, w, h);
+
+    // Red
+    ctx.beginPath();
+    ctx.arc(x - 12, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'red' ? '#EF4444' : '#450A0A';
+    if (color === 'red') { ctx.shadowColor = '#EF4444'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Yellow
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'yellow' ? '#FACC15' : '#422006';
+    if (color === 'yellow') { ctx.shadowColor = '#FACC15'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Green
+    ctx.beginPath();
+    ctx.arc(x + 12, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color === 'green' ? '#22C55E' : '#052E16';
+    if (color === 'green') { ctx.shadowColor = '#22C55E'; ctx.shadowBlur = 8; }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
 }
 
 function drawPortalBadge(

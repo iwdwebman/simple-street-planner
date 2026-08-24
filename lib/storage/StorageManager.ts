@@ -3,19 +3,24 @@
 import { PlayFile } from '../types/street';
 import { DEFAULT_SCENARIOS, SCENARIO_COMPLETE_STREET } from './defaultScenarios';
 
-const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v1';
-const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v1';
+const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v2';
+const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v2';
 
 export class StorageManager {
   /**
-   * Load active play file from localStorage, or return default scenario
+   * Load active play file from localStorage, or return default 4-way metropolis scenario
    */
   static loadActivePlayFile(): PlayFile {
     if (typeof window === 'undefined') return SCENARIO_COMPLETE_STREET;
     try {
       const data = localStorage.getItem(STORAGE_ACTIVE_PLAYFILE_KEY);
       if (data) {
-        return JSON.parse(data) as PlayFile;
+        const parsed = JSON.parse(data) as PlayFile;
+        // Verify that it is a 4-way 5x map scenario (has both east-west and north-south portals)
+        const hasNS = parsed.ingressPoints?.some((i) => i.side === 'north' || i.side === 'south');
+        if (hasNS && parsed.street?.worldWidth) {
+          return parsed;
+        }
       }
     } catch (e) {
       console.warn('Failed to load active play file from localStorage:', e);
@@ -44,7 +49,6 @@ export class StorageManager {
     try {
       const data = localStorage.getItem(STORAGE_CUSTOM_PLAYFILES_KEY);
       const customFiles: PlayFile[] = data ? JSON.parse(data) : [];
-      // Combine with defaults (filter duplicates by id)
       const map = new Map<string, PlayFile>();
       for (const def of DEFAULT_SCENARIOS) map.set(def.id, def);
       for (const cust of customFiles) map.set(cust.id, cust);

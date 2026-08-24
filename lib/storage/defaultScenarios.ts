@@ -1,4 +1,4 @@
-// Default Pre-Configured Play Files (Scenarios) with 5x 4-Way Perimeter Portals
+// Default Pre-Configured Play Files with Complete 4-Way Through & Turning Movements
 
 import { PlayFile } from '../types/street';
 import { DEFAULT_DIURNAL_PROFILE } from '../simulation/DemandManager';
@@ -6,7 +6,7 @@ import { DEFAULT_DIURNAL_PROFILE } from '../simulation/DemandManager';
 export const SCENARIO_COMPLETE_STREET: PlayFile = {
   id: 'scenario_metropolis_crossroads',
   name: '🌆 Metropolis 4-Way Grand Crossroads (5x Map)',
-  description: 'Expansive 5x multi-modal metropolitan intersection with ingress/outgress portals centered on North, South, East, and West perimeter sides.',
+  description: 'Expansive 5x multi-modal metropolitan intersection with through and turning flows across North, South, East, and West portals.',
   version: '2.0.0',
   lastModified: new Date().toISOString(),
   initialTimeOfDayHours: 8.5,
@@ -44,21 +44,37 @@ export const SCENARIO_COMPLETE_STREET: PlayFile = {
       name: 'Grand Central 4-Way Crossroads Signal',
       type: 'lights',
       positionMeters: 90,
-      signalPattern: 'NS_EW_STANDARD',
+      signalPattern: 'PROTECTED_TURNS',
       signalPhases: [
         {
-          id: 'phase_ew',
-          name: 'East-West Boulevard Green',
-          greenLaneIds: ['travel_eb_1', 'transit_eb', 'travel_wb_1', 'bike_eb', 'bike_wb', 'sidewalk_eb', 'sidewalk_wb'],
-          greenDuration: 28,
+          id: 'phase_ns_through',
+          name: 'North-South Through & Right',
+          greenLaneIds: ['ns_travel_sb', 'ns_travel_nb', 'turn_n_w', 'turn_s_e', 'ns_bike_sb', 'ns_bike_nb', 'ns_walk_sb', 'ns_walk_nb'],
+          greenDuration: 22,
           yellowDuration: 3,
           allRedDuration: 2,
         },
         {
-          id: 'phase_ns',
-          name: 'North-South Avenue Green',
-          greenLaneIds: ['ns_travel_sb', 'ns_travel_nb', 'ns_bike_nb', 'ns_bike_sb', 'ns_walk_nb', 'ns_walk_sb'],
-          greenDuration: 22,
+          id: 'phase_ns_lefts',
+          name: 'North-South Protected Lefts',
+          greenLaneIds: ['turn_n_e', 'turn_s_w'],
+          greenDuration: 12,
+          yellowDuration: 3,
+          allRedDuration: 2,
+        },
+        {
+          id: 'phase_ew_through',
+          name: 'East-West Through & Right',
+          greenLaneIds: ['travel_eb_1', 'transit_eb', 'travel_wb_1', 'turn_w_s', 'turn_e_n', 'bike_eb', 'bike_wb', 'sidewalk_eb', 'sidewalk_wb'],
+          greenDuration: 25,
+          yellowDuration: 3,
+          allRedDuration: 2,
+        },
+        {
+          id: 'phase_ew_lefts',
+          name: 'East-West Protected Lefts',
+          greenLaneIds: ['turn_w_n', 'turn_e_s'],
+          greenDuration: 14,
           yellowDuration: 3,
           allRedDuration: 2,
         },
@@ -71,21 +87,29 @@ export const SCENARIO_COMPLETE_STREET: PlayFile = {
     { id: 'ing_w_bike', name: 'West Portal Bike EB', laneId: 'bike_eb', positionMeters: 0, side: 'west' },
     { id: 'ing_w_car', name: 'West Portal Motor EB', laneId: 'travel_eb_1', positionMeters: 0, side: 'west' },
     { id: 'ing_w_bus', name: 'West Portal Transit EB', laneId: 'transit_eb', positionMeters: 0, side: 'west' },
+    { id: 'ing_w_turn_s', name: 'West Portal Turn -> South', laneId: 'turn_w_s', positionMeters: 0, side: 'west' },
+    { id: 'ing_w_turn_n', name: 'West Portal Turn -> North', laneId: 'turn_w_n', positionMeters: 0, side: 'west' },
 
     // East Center Portal
     { id: 'ing_e_ped', name: 'East Portal Sidewalk WB', laneId: 'sidewalk_wb', positionMeters: 0, side: 'east' },
     { id: 'ing_e_bike', name: 'East Portal Bike WB', laneId: 'bike_wb', positionMeters: 0, side: 'east' },
     { id: 'ing_e_car', name: 'East Portal Motor WB', laneId: 'travel_wb_1', positionMeters: 0, side: 'east' },
+    { id: 'ing_e_turn_n', name: 'East Portal Turn -> North', laneId: 'turn_e_n', positionMeters: 0, side: 'east' },
+    { id: 'ing_e_turn_s', name: 'East Portal Turn -> South', laneId: 'turn_e_s', positionMeters: 0, side: 'east' },
 
     // North Center Portal
     { id: 'ing_n_ped', name: 'North Portal Sidewalk SB', laneId: 'ns_walk_sb', positionMeters: 0, side: 'north' },
     { id: 'ing_n_bike', name: 'North Portal Bike SB', laneId: 'ns_bike_sb', positionMeters: 0, side: 'north' },
     { id: 'ing_n_car', name: 'North Portal Motor SB', laneId: 'ns_travel_sb', positionMeters: 0, side: 'north' },
+    { id: 'ing_n_turn_w', name: 'North Portal Turn -> West', laneId: 'turn_n_w', positionMeters: 0, side: 'north' },
+    { id: 'ing_n_turn_e', name: 'North Portal Turn -> East', laneId: 'turn_n_e', positionMeters: 0, side: 'north' },
 
     // South Center Portal
     { id: 'ing_s_ped', name: 'South Portal Sidewalk NB', laneId: 'ns_walk_nb', positionMeters: 0, side: 'south' },
     { id: 'ing_s_bike', name: 'South Portal Bike NB', laneId: 'ns_bike_nb', positionMeters: 0, side: 'south' },
     { id: 'ing_s_car', name: 'South Portal Motor NB', laneId: 'ns_travel_nb', positionMeters: 0, side: 'south' },
+    { id: 'ing_s_turn_e', name: 'South Portal Turn -> East', laneId: 'turn_s_e', positionMeters: 0, side: 'south' },
+    { id: 'ing_s_turn_w', name: 'South Portal Turn -> West', laneId: 'turn_s_w', positionMeters: 0, side: 'south' },
   ],
   outgressPoints: [
     // East Center Outgress
@@ -93,48 +117,87 @@ export const SCENARIO_COMPLETE_STREET: PlayFile = {
     { id: 'out_e_bike', name: 'East Portal Bike Exit', laneId: 'bike_eb', positionMeters: 195, side: 'east' },
     { id: 'out_e_car', name: 'East Portal Motor Exit', laneId: 'travel_eb_1', positionMeters: 195, side: 'east' },
     { id: 'out_e_bus', name: 'East Portal Transit Exit', laneId: 'transit_eb', positionMeters: 195, side: 'east' },
+    { id: 'out_e_turn_from_n', name: 'East Portal Exit (from North)', laneId: 'turn_n_e', positionMeters: 195, side: 'east' },
+    { id: 'out_e_turn_from_s', name: 'East Portal Exit (from South)', laneId: 'turn_s_e', positionMeters: 195, side: 'east' },
 
     // West Center Outgress
     { id: 'out_w_ped', name: 'West Portal Sidewalk Exit', laneId: 'sidewalk_wb', positionMeters: 195, side: 'west' },
     { id: 'out_w_bike', name: 'West Portal Bike Exit', laneId: 'bike_wb', positionMeters: 195, side: 'west' },
     { id: 'out_w_car', name: 'West Portal Motor Exit', laneId: 'travel_wb_1', positionMeters: 195, side: 'west' },
+    { id: 'out_w_turn_from_n', name: 'West Portal Exit (from North)', laneId: 'turn_n_w', positionMeters: 195, side: 'west' },
+    { id: 'out_w_turn_from_s', name: 'West Portal Exit (from South)', laneId: 'turn_s_w', positionMeters: 195, side: 'west' },
 
     // South Center Outgress
     { id: 'out_s_ped', name: 'South Portal Sidewalk Exit', laneId: 'ns_walk_sb', positionMeters: 145, side: 'south' },
     { id: 'out_s_bike', name: 'South Portal Bike Exit', laneId: 'ns_bike_sb', positionMeters: 145, side: 'south' },
     { id: 'out_s_car', name: 'South Portal Motor Exit', laneId: 'ns_travel_sb', positionMeters: 145, side: 'south' },
+    { id: 'out_s_turn_from_w', name: 'South Portal Exit (from West)', laneId: 'turn_w_s', positionMeters: 145, side: 'south' },
+    { id: 'out_s_turn_from_e', name: 'South Portal Exit (from East)', laneId: 'turn_e_s', positionMeters: 145, side: 'south' },
 
     // North Center Outgress
     { id: 'out_n_ped', name: 'North Portal Sidewalk Exit', laneId: 'ns_walk_nb', positionMeters: 145, side: 'north' },
     { id: 'out_n_bike', name: 'North Portal Bike Exit', laneId: 'ns_bike_nb', positionMeters: 145, side: 'north' },
     { id: 'out_n_car', name: 'North Portal Motor Exit', laneId: 'ns_travel_nb', positionMeters: 145, side: 'north' },
+    { id: 'out_n_turn_from_w', name: 'North Portal Exit (from West)', laneId: 'turn_w_n', positionMeters: 145, side: 'north' },
+    { id: 'out_n_turn_from_e', name: 'North Portal Exit (from East)', laneId: 'turn_e_n', positionMeters: 145, side: 'north' },
   ],
   demandRoutes: [
-    // East-West Corridor Demand (West -> East)
-    { id: 'r_w_ped', name: 'West -> East Walkers', originIngressId: 'ing_w_ped', destinationOutgressId: 'out_e_ped', vehicleType: 'walker', baseRatePerMinute: 22 },
-    { id: 'r_w_bike', name: 'West -> East Cyclists', originIngressId: 'ing_w_bike', destinationOutgressId: 'out_e_bike', vehicleType: 'bike', baseRatePerMinute: 16 },
-    { id: 'r_w_car', name: 'West -> East Commuter Cars', originIngressId: 'ing_w_car', destinationOutgressId: 'out_e_car', vehicleType: 'car', baseRatePerMinute: 18 },
-    { id: 'r_w_bus', name: 'West -> East Express Bus', originIngressId: 'ing_w_bus', destinationOutgressId: 'out_e_bus', vehicleType: 'bus', baseRatePerMinute: 5 },
+    // --- 1. Through Movements ---
+    // West -> East
+    { id: 'r_w_ped', name: 'West -> East Walkers', originIngressId: 'ing_w_ped', destinationOutgressId: 'out_e_ped', vehicleType: 'walker', baseRatePerMinute: 20 },
+    { id: 'r_w_bike', name: 'West -> East Cyclists', originIngressId: 'ing_w_bike', destinationOutgressId: 'out_e_bike', vehicleType: 'bike', baseRatePerMinute: 14 },
+    { id: 'r_w_car', name: 'West -> East Cars', originIngressId: 'ing_w_car', destinationOutgressId: 'out_e_car', vehicleType: 'car', baseRatePerMinute: 18 },
+    { id: 'r_w_bus', name: 'West -> East Transit Bus', originIngressId: 'ing_w_bus', destinationOutgressId: 'out_e_bus', vehicleType: 'bus', baseRatePerMinute: 5 },
     { id: 'r_w_semi', name: 'West -> East Freight Semi', originIngressId: 'ing_w_car', destinationOutgressId: 'out_e_car', vehicleType: 'semi', baseRatePerMinute: 4 },
 
-    // Westbound Corridor Demand (East -> West)
+    // East -> West
     { id: 'r_e_ped', name: 'East -> West Walkers', originIngressId: 'ing_e_ped', destinationOutgressId: 'out_w_ped', vehicleType: 'walker', baseRatePerMinute: 20 },
     { id: 'r_e_bike', name: 'East -> West Cyclists', originIngressId: 'ing_e_bike', destinationOutgressId: 'out_w_bike', vehicleType: 'bike', baseRatePerMinute: 14 },
-    { id: 'r_e_car', name: 'East -> West Passenger Cars', originIngressId: 'ing_e_car', destinationOutgressId: 'out_w_car', vehicleType: 'car', baseRatePerMinute: 16 },
+    { id: 'r_e_car', name: 'East -> West Cars', originIngressId: 'ing_e_car', destinationOutgressId: 'out_w_car', vehicleType: 'car', baseRatePerMinute: 18 },
     { id: 'r_e_deliv', name: 'East -> West Delivery Vans', originIngressId: 'ing_e_car', destinationOutgressId: 'out_w_car', vehicleType: 'delivery', baseRatePerMinute: 10 },
-    { id: 'r_e_truck', name: 'East -> West Utility Trucks', originIngressId: 'ing_e_car', destinationOutgressId: 'out_w_car', vehicleType: 'truck', baseRatePerMinute: 8 },
+    { id: 'r_e_truck', name: 'East -> West Medium Trucks', originIngressId: 'ing_e_car', destinationOutgressId: 'out_w_car', vehicleType: 'truck', baseRatePerMinute: 6 },
 
-    // Southbound Corridor Demand (North -> South)
+    // North -> South
     { id: 'r_n_ped', name: 'North -> South Walkers', originIngressId: 'ing_n_ped', destinationOutgressId: 'out_s_ped', vehicleType: 'walker', baseRatePerMinute: 18 },
     { id: 'r_n_bike', name: 'North -> South Cyclists', originIngressId: 'ing_n_bike', destinationOutgressId: 'out_s_bike', vehicleType: 'bike', baseRatePerMinute: 12 },
-    { id: 'r_n_car', name: 'North -> South Avenue Cars', originIngressId: 'ing_n_car', destinationOutgressId: 'out_s_car', vehicleType: 'car', baseRatePerMinute: 14 },
+    { id: 'r_n_car', name: 'North -> South Cars', originIngressId: 'ing_n_car', destinationOutgressId: 'out_s_car', vehicleType: 'car', baseRatePerMinute: 18 },
     { id: 'r_n_deliv', name: 'North -> South Delivery Vans', originIngressId: 'ing_n_car', destinationOutgressId: 'out_s_car', vehicleType: 'delivery', baseRatePerMinute: 8 },
 
-    // Northbound Corridor Demand (South -> North)
+    // South -> North
     { id: 'r_s_ped', name: 'South -> North Walkers', originIngressId: 'ing_s_ped', destinationOutgressId: 'out_n_ped', vehicleType: 'walker', baseRatePerMinute: 18 },
     { id: 'r_s_bike', name: 'South -> North Cyclists', originIngressId: 'ing_s_bike', destinationOutgressId: 'out_n_bike', vehicleType: 'bike', baseRatePerMinute: 12 },
-    { id: 'r_s_car', name: 'South -> North Avenue Cars', originIngressId: 'ing_s_car', destinationOutgressId: 'out_n_car', vehicleType: 'car', baseRatePerMinute: 14 },
-    { id: 'r_s_truck', name: 'South -> North Medium Trucks', originIngressId: 'ing_s_car', destinationOutgressId: 'out_n_car', vehicleType: 'truck', baseRatePerMinute: 7 },
+    { id: 'r_s_car', name: 'South -> North Cars', originIngressId: 'ing_s_car', destinationOutgressId: 'out_n_car', vehicleType: 'car', baseRatePerMinute: 18 },
+    { id: 'r_s_truck', name: 'South -> North Medium Trucks', originIngressId: 'ing_s_car', destinationOutgressId: 'out_n_car', vehicleType: 'truck', baseRatePerMinute: 8 },
+
+    // --- 2. Multi-Directional Turning Movements ---
+    // West -> South (Right Turn)
+    { id: 'r_turn_w_s', name: 'West -> South Turn (Delivery)', originIngressId: 'ing_w_turn_s', destinationOutgressId: 'out_s_turn_from_w', vehicleType: 'delivery', baseRatePerMinute: 8 },
+    { id: 'r_turn_w_s_car', name: 'West -> South Turn (Cars)', originIngressId: 'ing_w_turn_s', destinationOutgressId: 'out_s_turn_from_w', vehicleType: 'car', baseRatePerMinute: 10 },
+
+    // West -> North (Left Turn)
+    { id: 'r_turn_w_n', name: 'West -> North Left Turn (Cars)', originIngressId: 'ing_w_turn_n', destinationOutgressId: 'out_n_turn_from_w', vehicleType: 'car', baseRatePerMinute: 9 },
+    { id: 'r_turn_w_n_truck', name: 'West -> North Left Turn (Trucks)', originIngressId: 'ing_w_turn_n', destinationOutgressId: 'out_n_turn_from_w', vehicleType: 'truck', baseRatePerMinute: 5 },
+
+    // East -> North (Right Turn)
+    { id: 'r_turn_e_n', name: 'East -> North Turn (Cars)', originIngressId: 'ing_e_turn_n', destinationOutgressId: 'out_n_turn_from_e', vehicleType: 'car', baseRatePerMinute: 10 },
+    { id: 'r_turn_e_n_deliv', name: 'East -> North Turn (Delivery)', originIngressId: 'ing_e_turn_n', destinationOutgressId: 'out_n_turn_from_e', vehicleType: 'delivery', baseRatePerMinute: 6 },
+
+    // East -> South (Left Turn)
+    { id: 'r_turn_e_s', name: 'East -> South Left Turn (Cars)', originIngressId: 'ing_e_turn_s', destinationOutgressId: 'out_s_turn_from_e', vehicleType: 'car', baseRatePerMinute: 9 },
+
+    // North -> West (Right Turn)
+    { id: 'r_turn_n_w', name: 'North -> West Turn (Cars)', originIngressId: 'ing_n_turn_w', destinationOutgressId: 'out_w_turn_from_n', vehicleType: 'car', baseRatePerMinute: 10 },
+    { id: 'r_turn_n_w_deliv', name: 'North -> West Turn (Delivery)', originIngressId: 'ing_n_turn_w', destinationOutgressId: 'out_w_turn_from_n', vehicleType: 'delivery', baseRatePerMinute: 6 },
+
+    // North -> East (Left Turn)
+    { id: 'r_turn_n_e', name: 'North -> East Left Turn (Cars)', originIngressId: 'ing_n_turn_e', destinationOutgressId: 'out_e_turn_from_n', vehicleType: 'car', baseRatePerMinute: 8 },
+
+    // South -> East (Right Turn)
+    { id: 'r_turn_s_e', name: 'South -> East Turn (Cars)', originIngressId: 'ing_s_turn_e', destinationOutgressId: 'out_e_turn_from_s', vehicleType: 'car', baseRatePerMinute: 10 },
+    { id: 'r_turn_s_e_bus', name: 'South -> East Turn (Bus)', originIngressId: 'ing_s_turn_e', destinationOutgressId: 'out_e_turn_from_s', vehicleType: 'bus', baseRatePerMinute: 3 },
+
+    // South -> West (Left Turn)
+    { id: 'r_turn_s_w', name: 'South -> West Left Turn (Cars)', originIngressId: 'ing_s_turn_w', destinationOutgressId: 'out_w_turn_from_s', vehicleType: 'car', baseRatePerMinute: 9 },
   ],
 };
 
