@@ -1,7 +1,7 @@
 // Unified Fixed-Timestep Multi-Modal Simulation Engine for 5x 4-Way Crossroads
 
 import { Vehicle } from './Vehicle';
-import { LaneSegment, buildNetworkFromConfig, evaluateBezierFull } from './Network';
+import { LaneSegment, buildNetworkFromConfig, evaluateLanePosition } from './Network';
 import { TrafficSignal } from './TrafficSignal';
 import { DemandManager, DEFAULT_DIURNAL_PROFILE } from './DemandManager';
 import {
@@ -144,12 +144,7 @@ export class Engine {
 
       for (let i = 0; i < lane.vehicles.length; i++) {
         const v = lane.vehicles[i];
-        const tPos = Math.max(0, Math.min(1, v.s / Math.max(1, lane.length)));
-
-        // Calculate local curve safe speed
-        const curveEval = evaluateBezierFull(lane.curve, tPos);
-        const curveSafeSpeed = curveEval.maxSafeSpeed;
-
+        const { maxSafeSpeed: curveSafeSpeed } = evaluateLanePosition(lane, v.s);
         const targetSpeed = Math.min(v.v0, baseLaneSpeedMs, curveSafeSpeed);
 
         let sLead = Infinity;

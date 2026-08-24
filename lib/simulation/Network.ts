@@ -1,4 +1,4 @@
-// High-Precision Piecewise Analytical Geometry & Intersection Turning Dynamics
+// Real-World Piecewise Lane Geometry & Precision 4-Way Crossroads Network
 
 import { Vehicle } from './Vehicle';
 import { LaneType, LaneDirection, StreetConfig, LaneDefinition } from '../types/street';
@@ -6,6 +6,18 @@ import { CubicBezier, evaluateBezierFull, approximateBezierLength } from './Curv
 
 export { evaluateBezierFull, approximateBezierLength };
 export type { CubicBezier };
+
+export interface PiecewisePath {
+  appStart: { x: number; y: number };
+  stopPt: { x: number; y: number };
+  depStart: { x: number; y: number };
+  depEnd: { x: number; y: number };
+  appLenM: number;
+  turnLenM: number;
+  depLenM: number;
+  totalLenM: number;
+  turnCurve: CubicBezier;
+}
 
 export interface LaneSegment {
   id: string;
@@ -19,6 +31,7 @@ export interface LaneSegment {
   yOffsetPx: number;
   length: number;
   curve: CubicBezier;
+  piecewise?: PiecewisePath;
   vehicles: Vehicle[];
   nextLanes: string[];
   stopLine?: number;
@@ -32,69 +45,48 @@ export const MARGIN_PORTAL = 40;
 export const INTERSECTION_RADIUS = 100; // px half-size of crossroads junction box
 
 /**
- * Piecewise path evaluator that guarantees 100% straight parallel approach,
- * tight 90-degree turn ONLY inside the intersection core, and straight departure.
+ * Evaluate vehicle position and angle along any lane (guaranteeing 100% straight approach/departure and junction-only turning)
  */
-export interface CompositeTurnPath {
-  approachStart: { x: number; y: number };
-  stopPoint: { x: number; y: number };
-  departureStart: { x: number; y: number };
-  departureEnd: { x: number; y: number };
-  approachLengthM: number;
-  turnLengthM: number;
-  departureLengthM: number;
-  totalLengthM: number;
-  type: 'left' | 'right' | 'through' | 'crosswalk';
-}
-
-/**
- * Evaluate point and angle along a piecewise composite lane path
- */
-export function evaluateCompositePath(
-  path: CompositeTurnPath,
+export function evaluateLanePosition(
+  lane: LaneSegment,
   sMeters: number,
-): { x: number; y: number; angle: number } {
-  const s = Math.max(0, Math.min(path.totalLengthM, sMeters));
-  const sApp = path.approachLengthM;
-  const sTurn = path.turnLengthM;
+): { x: number; y: number; angle: number; maxSafeSpeed: number } {
+  if (lane.piecewise) {
+    const pw = lane.piecewise;
+    const s = Math.max(0, Math.min(pw.totalLenM, sMeters));
 
-  // 1. Approach Stage: 100% Straight Parallel Line
-  if (s <= sApp) {
-    const t = sApp > 0 ? s / sApp : 0;
-    const x = path.approachStart.x + (path.stopPoint.x - path.approachStart.x) * t;
-    const y = path.approachStart.y + (path.stopPoint.y - path.approachStart.y) * t;
-    const angle = Math.atan2(path.stopPoint.y - path.approachStart.y, path.stopPoint.x - path.approachStart.x);
-    return { x, y, angle };
+    // Stage 1: Approach (100% straight parallel lane)
+    if (s <= pw.appLenM) {
+      const t = pw.appLenM > 0 ? s / pw.appLenM : 0;
+      const x = pw.appStart.x + (pw.stopPt.x - pw.appStart.x) * t;
+      const y = pw.appStart.y + (pw.stopPt.y - pw.appStart.y) * t;
+      const angle = Math.atan2(pw.stopPt.y - pw.appStart.y, pw.stopPt.x - pw.appStart.x);
+      return { x, y, angle, maxSafeSpeed: (lane.speedLimitKmh || 50) / 3.6 };
+    }
+
+    // Stage 2: Departure (100% straight parallel lane)
+    if (s >= pw.appLenM + pw.turnLenM) {
+      const sDep = s - (pw.appLenM + pw.turnLenM);
+      const t = pw.depLenM > 0 ? sDep / pw.depLenM : 1;
+      const x = pw.depStart.x + (pw.depEnd.x - pw.depStart.x) * t;
+      const y = pw.depStart.y + (pw.depEnd.y - pw.depStart.y) * t;
+      const angle = Math.atan2(pw.depEnd.y - pw.depStart.y, pw.depEnd.x - pw.depStart.x);
+      return { x, y, angle, maxSafeSpeed: (lane.speedLimitKmh || 50) / 3.6 };
+    }
+
+    // Stage 3: Inside Intersection Junction Box Only
+    const tTurn = pw.turnLenM > 0 ? (s - pw.appLenM) / pw.turnLenM : 0;
+    const pt = evaluateBezierFull(pw.turnCurve, tTurn);
+    return { x: pt.x, y: pt.y, angle: pt.angle, maxSafeSpeed: 30 / 3.6 };
   }
 
-  // 2. Departure Stage: 100% Straight Parallel Line
-  if (s >= sApp + sTurn) {
-    const sDep = s - (sApp + sTurn);
-    const t = path.departureLengthM > 0 ? sDep / path.departureLengthM : 1;
-    const x = path.departureStart.x + (path.departureEnd.x - path.departureStart.x) * t;
-    const y = path.departureStart.y + (path.departureEnd.y - path.departureStart.y) * t;
-    const angle = Math.atan2(path.departureEnd.y - path.departureStart.y, path.departureEnd.x - path.departureStart.x);
-    return { x, y, angle };
-  }
-
-  // 3. Intersection Turn Stage: Smooth 90-degree corner arc inside intersection core ONLY
-  const tTurn = sTurn > 0 ? (s - sApp) / sTurn : 0;
-  // Cubic Bézier inside intersection box: P0 = stopPoint, P3 = departureStart
-  const dx = path.departureStart.x - path.stopPoint.x;
-  const dy = path.departureStart.y - path.stopPoint.y;
-
-  const p0 = path.stopPoint;
-  const p3 = path.departureStart;
-  const p1 = { x: p0.x + (path.type === 'left' ? dx * 0.6 : dx * 0.4), y: p0.y + (path.type === 'left' ? dy * 0.1 : dy * 0.1) };
-  const p2 = { x: p0.x + (path.type === 'left' ? dx * 0.9 : dx * 0.9), y: p0.y + (path.type === 'left' ? dy * 0.4 : dy * 0.6) };
-
-  const bezCurve: CubicBezier = { p0, p1, p2, p3 };
-  const pt = evaluateBezierFull(bezCurve, tTurn);
-  return { x: pt.x, y: pt.y, angle: pt.angle };
+  // Fallback for straight through lanes
+  const t = Math.max(0, Math.min(1, sMeters / Math.max(0.1, lane.length)));
+  return evaluateBezierFull(lane.curve, t);
 }
 
 /**
- * Build 5x Multi-Corridor Road Network with Clean Geometry
+ * Build Full 5x Multi-Corridor Road Network with Visible Parallel Turn Pocket Bays
  */
 export function buildNetworkFromConfig(config: StreetConfig): {
   lanes: LaneSegment[];
@@ -114,7 +106,6 @@ export function buildNetworkFromConfig(config: StreetConfig): {
 
   const R = INTERSECTION_RADIUS; // 100px
 
-  // Stop line coordinates
   const stopX_EB = centerX - R;
   const stopX_WB = centerX + R;
   const stopY_SB = centerY - R;
@@ -123,60 +114,32 @@ export function buildNetworkFromConfig(config: StreetConfig): {
   const stopDistEW = (centerX - R - leftX) / PIXELS_PER_METER;
   const stopDistNS = (centerY - R - topY) / PIXELS_PER_METER;
 
-  // --- Right-Hand Traffic (RHT) Street Cross-Section Layout ---
-  // East-West Corridor (Total width ~180px):
-  // North half (Westbound, y < centerY):
-  //   - North Sidewalk: centerY - 80
-  //   - WB Bike Lane: centerY - 58
-  //   - WB Right Turn Bay: centerY - 40
-  //   - WB Through Lane: centerY - 22
-  //   - WB Left Turn Bay: centerY - 7
-  // Center Median: centerY ± 4
-  // South half (Eastbound, y > centerY):
-  //   - EB Left Turn Bay: centerY + 7
-  //   - EB Through Lane: centerY + 22
-  //   - EB Right Turn Bay / Transit: centerY + 40
-  //   - EB Bike Lane: centerY + 58
-  //   - South Sidewalk: centerY + 80
+  // --- Real-World Right-Hand Traffic (RHT) Cross-Section Geometry ---
+  // East-West Corridor Y-offsets (North side = Westbound, South side = Eastbound)
+  const yWalkWB = centerY - 84;
+  const yBikeWB = centerY - 64;
+  const yTurnRightWB = centerY - 44;
+  const yThroughWB = centerY - 24;
+  const yTurnLeftWB = centerY - 8;
 
-  const yWalkWB = centerY - 80;
-  const yBikeWB = centerY - 58;
-  const yTurnRightWB = centerY - 40;
-  const yThroughWB = centerY - 22;
-  const yTurnLeftWB = centerY - 7;
+  const yTurnLeftEB = centerY + 8;
+  const yThroughEB = centerY + 24;
+  const yTurnRightEB = centerY + 44;
+  const yBikeEB = centerY + 64;
+  const yWalkEB = centerY + 84;
 
-  const yTurnLeftEB = centerY + 7;
-  const yThroughEB = centerY + 22;
-  const yTurnRightEB = centerY + 40;
-  const yBikeEB = centerY + 58;
-  const yWalkEB = centerY + 80;
+  // North-South Corridor X-offsets (West side = Southbound, East side = Northbound)
+  const xWalkSB = centerX - 84;
+  const xBikeSB = centerX - 64;
+  const xTurnRightSB = centerX - 44;
+  const xThroughSB = centerX - 24;
+  const xTurnLeftSB = centerX - 8;
 
-  // North-South Corridor (Total width ~180px):
-  // West half (Southbound, x < centerX):
-  //   - West Sidewalk: centerX - 80
-  //   - SB Bike Lane: centerX - 58
-  //   - SB Right Turn Bay: centerX - 40
-  //   - SB Through Lane: centerX - 22
-  //   - SB Left Turn Bay: centerX - 7
-  // Center Median: centerX ± 4
-  // East half (Northbound, x > centerX):
-  //   - NB Left Turn Bay: centerX + 7
-  //   - NB Through Lane: centerX + 22
-  //   - NB Right Turn Bay: centerX + 40
-  //   - NB Bike Lane: centerX + 58
-  //   - East Sidewalk: centerX + 80
-
-  const xWalkSB = centerX - 80;
-  const xBikeSB = centerX - 58;
-  const xTurnRightSB = centerX - 40;
-  const xThroughSB = centerX - 22;
-  const xTurnLeftSB = centerX - 7;
-
-  const xTurnLeftNB = centerX + 7;
-  const xThroughNB = centerX + 22;
-  const xTurnRightNB = centerX + 40;
-  const xBikeNB = centerX + 58;
-  const xWalkNB = centerX + 80;
+  const xTurnLeftNB = centerX + 8;
+  const xThroughNB = centerX + 24;
+  const xTurnRightNB = centerX + 44;
+  const xBikeNB = centerX + 64;
+  const xWalkNB = centerX + 84;
 
   // Helper for straight through corridors
   const addStraightHorizontal = (id: string, name: string, type: LaneType, y: number, dir: LaneDirection, speedLimit: number) => {
@@ -200,7 +163,7 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       direction: dir,
       orientation: 'horizontal',
       widthMeters: 3.2,
-      renderHeightPx: type === 'sidewalk' ? 24 : type === 'bike' ? 20 : 26,
+      renderHeightPx: type === 'sidewalk' ? 22 : type === 'bike' ? 18 : 22,
       yOffsetPx: y,
       length: lengthMeters,
       curve,
@@ -232,7 +195,7 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       direction: dir,
       orientation: 'vertical',
       widthMeters: 3.2,
-      renderHeightPx: type === 'sidewalk' ? 24 : type === 'bike' ? 20 : 26,
+      renderHeightPx: type === 'sidewalk' ? 22 : type === 'bike' ? 18 : 22,
       xOffsetPx: x,
       yOffsetPx: centerY,
       length: lengthMeters,
@@ -244,7 +207,7 @@ export function buildNetworkFromConfig(config: StreetConfig): {
     });
   };
 
-  // --- 1. Through Corridors ---
+  // --- 1. Through Corridors (All Visible Asphalt & Sidewalks) ---
   addStraightHorizontal('sidewalk_wb', 'North Sidewalk WB', 'sidewalk', yWalkWB, 'reverse', 5);
   addStraightHorizontal('bike_wb', 'Westbound Bike Lane', 'bike', yBikeWB, 'reverse', 20);
   addStraightHorizontal('travel_wb_1', 'Boulevard WB Through', 'motor', yThroughWB, 'reverse', 50);
@@ -262,21 +225,40 @@ export function buildNetworkFromConfig(config: StreetConfig): {
   addStraightVertical('ns_bike_nb', 'Northbound Bike Lane', 'bike', xBikeNB, 'reverse', 20);
   addStraightVertical('ns_walk_nb', 'East Sidewalk NB', 'sidewalk', xWalkNB, 'reverse', 5);
 
-  // --- 2. Dedicated Turning Pocket Lanes (Strict Approach + Junction 90-deg Turn) ---
-  // Helper to build a clean 4-point Bézier for turn pockets
-  const addTurnPocketLane = (
+  // --- 2. Piecewise Turn Pocket Lanes (100% Straight Approach -> 90-deg Junction Arc -> 100% Straight Departure) ---
+  const addPiecewiseTurnLane = (
     id: string,
     name: string,
-    type: 'turn_left' | 'turn_right',
+    type: 'turn_left' | 'turn_right' | 'sidewalk',
     dir: LaneDirection,
-    p0: { x: number; y: number },
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    p3: { x: number; y: number },
-    stopLine: number,
+    appStart: { x: number; y: number },
+    stopPt: { x: number; y: number },
+    depStart: { x: number; y: number },
+    depEnd: { x: number; y: number },
+    turnCurve: CubicBezier,
+    speedLimit: number,
   ) => {
-    const curve: CubicBezier = { p0, p1, p2, p3 };
-    const lengthMeters = approximateBezierLength(curve, 32) / PIXELS_PER_METER;
+    const appLenPx = Math.hypot(stopPt.x - appStart.x, stopPt.y - appStart.y);
+    const turnLenPx = approximateBezierLength(turnCurve, 20);
+    const depLenPx = Math.hypot(depEnd.x - depStart.x, depEnd.y - depStart.y);
+
+    const appLenM = appLenPx / PIXELS_PER_METER;
+    const turnLenM = turnLenPx / PIXELS_PER_METER;
+    const depLenM = depLenPx / PIXELS_PER_METER;
+    const totalLenM = appLenM + turnLenM + depLenM;
+
+    const piecewise: PiecewisePath = {
+      appStart,
+      stopPt,
+      depStart,
+      depEnd,
+      appLenM,
+      turnLenM,
+      depLenM,
+      totalLenM,
+      turnCurve,
+    };
+
     lanes.push({
       id,
       name,
@@ -284,231 +266,320 @@ export function buildNetworkFromConfig(config: StreetConfig): {
       direction: dir,
       orientation: 'turn',
       widthMeters: 3.2,
-      renderHeightPx: 26,
-      yOffsetPx: p0.y,
-      length: lengthMeters,
-      curve,
+      renderHeightPx: type === 'sidewalk' ? 22 : 22,
+      yOffsetPx: appStart.y,
+      xOffsetPx: appStart.x,
+      length: totalLenM,
+      curve: turnCurve,
+      piecewise,
       vehicles: [],
       nextLanes: [],
-      stopLine,
-      speedLimitKmh: type === 'turn_left' ? 35 : 30,
+      stopLine: appLenM,
+      speedLimitKmh: speedLimit,
     });
   };
 
-  // EB Left Turn (EB -> NB): Runs along y = yTurnLeftEB until stopX_EB, then turns North into xThroughNB
-  addTurnPocketLane(
+  // 1. Eastbound Left Turn Pocket (EB -> NB)
+  addPiecewiseTurnLane(
     'turn_left_eb',
     'Eastbound Left Turn Pocket',
     'turn_left',
     'forward',
     { x: leftX, y: yTurnLeftEB },
-    { x: stopX_EB + 40, y: yTurnLeftEB },
-    { x: xThroughNB, y: stopY_SB + 40 },
+    { x: stopX_EB, y: yTurnLeftEB },
+    { x: xThroughNB, y: stopY_SB },
     { x: xThroughNB, y: topY },
-    stopDistEW,
+    {
+      p0: { x: stopX_EB, y: yTurnLeftEB },
+      p1: { x: centerX - 10, y: yTurnLeftEB },
+      p2: { x: xThroughNB, y: centerY + 10 },
+      p3: { x: xThroughNB, y: stopY_SB },
+    },
+    35,
   );
 
-  // EB Right Turn (EB -> SB): Runs along y = yTurnRightEB until stopX_EB, then turns South into xThroughSB
-  addTurnPocketLane(
+  // 2. Eastbound Right Turn Pocket (EB -> SB)
+  addPiecewiseTurnLane(
     'turn_right_eb',
     'Eastbound Right Turn Pocket',
     'turn_right',
     'forward',
     { x: leftX, y: yTurnRightEB },
     { x: stopX_EB, y: yTurnRightEB },
-    { x: xThroughSB, y: stopY_NB - 30 },
+    { x: xThroughSB, y: stopY_NB },
     { x: xThroughSB, y: bottomY },
-    stopDistEW,
+    {
+      p0: { x: stopX_EB, y: yTurnRightEB },
+      p1: { x: stopX_EB + 30, y: yTurnRightEB },
+      p2: { x: xThroughSB, y: stopY_NB - 30 },
+      p3: { x: xThroughSB, y: stopY_NB },
+    },
+    30,
   );
 
-  // WB Left Turn (WB -> SB): Runs along y = yTurnLeftWB until stopX_WB, then turns South into xThroughSB
-  addTurnPocketLane(
+  // 3. Westbound Left Turn Pocket (WB -> SB)
+  addPiecewiseTurnLane(
     'turn_left_wb',
     'Westbound Left Turn Pocket',
     'turn_left',
     'reverse',
     { x: rightX, y: yTurnLeftWB },
-    { x: stopX_WB - 40, y: yTurnLeftWB },
-    { x: xThroughSB, y: stopY_NB - 40 },
+    { x: stopX_WB, y: yTurnLeftWB },
+    { x: xThroughSB, y: stopY_NB },
     { x: xThroughSB, y: bottomY },
-    stopDistEW,
+    {
+      p0: { x: stopX_WB, y: yTurnLeftWB },
+      p1: { x: centerX + 10, y: yTurnLeftWB },
+      p2: { x: xThroughSB, y: centerY - 10 },
+      p3: { x: xThroughSB, y: stopY_NB },
+    },
+    35,
   );
 
-  // WB Right Turn (WB -> NB): Runs along y = yTurnRightWB until stopX_WB, then turns North into xThroughNB
-  addTurnPocketLane(
+  // 4. Westbound Right Turn Pocket (WB -> NB)
+  addPiecewiseTurnLane(
     'turn_right_wb',
     'Westbound Right Turn Pocket',
     'turn_right',
     'reverse',
     { x: rightX, y: yTurnRightWB },
     { x: stopX_WB, y: yTurnRightWB },
-    { x: xThroughNB, y: stopY_SB + 30 },
+    { x: xThroughNB, y: stopY_SB },
     { x: xThroughNB, y: topY },
-    stopDistEW,
+    {
+      p0: { x: stopX_WB, y: yTurnRightWB },
+      p1: { x: stopX_WB - 30, y: yTurnRightWB },
+      p2: { x: xThroughNB, y: stopY_SB + 30 },
+      p3: { x: xThroughNB, y: stopY_SB },
+    },
+    30,
   );
 
-  // SB Left Turn (SB -> EB): Runs along x = xTurnLeftSB until stopY_SB, then turns East into yThroughEB
-  addTurnPocketLane(
+  // 5. Southbound Left Turn Pocket (SB -> EB)
+  addPiecewiseTurnLane(
     'turn_left_sb',
     'Southbound Left Turn Pocket',
     'turn_left',
     'forward',
     { x: xTurnLeftSB, y: topY },
-    { x: xTurnLeftSB, y: stopY_SB + 40 },
-    { x: stopX_EB + 40, y: yThroughEB },
+    { x: xTurnLeftSB, y: stopY_SB },
+    { x: stopX_WB, y: yThroughEB },
     { x: rightX, y: yThroughEB },
-    stopDistNS,
+    {
+      p0: { x: xTurnLeftSB, y: stopY_SB },
+      p1: { x: xTurnLeftSB, y: centerY - 10 },
+      p2: { x: centerX - 10, y: yThroughEB },
+      p3: { x: stopX_WB, y: yThroughEB },
+    },
+    35,
   );
 
-  // SB Right Turn (SB -> WB): Runs along x = xTurnRightSB until stopY_SB, then turns West into yThroughWB
-  addTurnPocketLane(
+  // 6. Southbound Right Turn Pocket (SB -> WB)
+  addPiecewiseTurnLane(
     'turn_right_sb',
     'Southbound Right Turn Pocket',
     'turn_right',
     'forward',
     { x: xTurnRightSB, y: topY },
     { x: xTurnRightSB, y: stopY_SB },
-    { x: stopX_WB - 30, y: yThroughWB },
+    { x: stopX_EB, y: yThroughWB },
     { x: leftX, y: yThroughWB },
-    stopDistNS,
+    {
+      p0: { x: xTurnRightSB, y: stopY_SB },
+      p1: { x: xTurnRightSB, y: stopY_SB + 30 },
+      p2: { x: stopX_EB + 30, y: yThroughWB },
+      p3: { x: stopX_EB, y: yThroughWB },
+    },
+    30,
   );
 
-  // NB Left Turn (NB -> WB): Runs along x = xTurnLeftNB until stopY_NB, then turns West into yThroughWB
-  addTurnPocketLane(
+  // 7. Northbound Left Turn Pocket (NB -> WB)
+  addPiecewiseTurnLane(
     'turn_left_nb',
     'Northbound Left Turn Pocket',
     'turn_left',
     'reverse',
     { x: xTurnLeftNB, y: bottomY },
-    { x: xTurnLeftNB, y: stopY_NB - 40 },
-    { x: stopX_WB - 40, y: yThroughWB },
+    { x: xTurnLeftNB, y: stopY_NB },
+    { x: stopX_EB, y: yThroughWB },
     { x: leftX, y: yThroughWB },
-    stopDistNS,
+    {
+      p0: { x: xTurnLeftNB, y: stopY_NB },
+      p1: { x: xTurnLeftNB, y: centerY + 10 },
+      p2: { x: centerX + 10, y: yThroughWB },
+      p3: { x: stopX_EB, y: yThroughWB },
+    },
+    35,
   );
 
-  // NB Right Turn (NB -> EB): Runs along x = xTurnRightNB until stopY_NB, then turns East into yThroughEB
-  addTurnPocketLane(
+  // 8. Northbound Right Turn Pocket (NB -> EB)
+  addPiecewiseTurnLane(
     'turn_right_nb',
     'Northbound Right Turn Pocket',
     'turn_right',
     'reverse',
     { x: xTurnRightNB, y: bottomY },
     { x: xTurnRightNB, y: stopY_NB },
-    { x: stopX_EB + 30, y: yThroughEB },
+    { x: stopX_WB, y: yThroughEB },
     { x: rightX, y: yThroughEB },
-    stopDistNS,
+    {
+      p0: { x: xTurnRightNB, y: stopY_NB },
+      p1: { x: xTurnRightNB, y: stopY_NB - 30 },
+      p2: { x: stopX_WB - 30, y: yThroughEB },
+      p3: { x: stopX_WB, y: yThroughEB },
+    },
+    30,
   );
 
-  // --- 3. Pedestrian Crosswalk Connectors (Strict Crosswalk Geometry) ---
-  const addPedCrosswalk = (
-    id: string,
-    name: string,
-    p0: { x: number; y: number },
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    p3: { x: number; y: number },
-    stopLine: number,
-  ) => {
-    const curve: CubicBezier = { p0, p1, p2, p3 };
-    const lengthMeters = approximateBezierLength(curve, 28) / PIXELS_PER_METER;
-    lanes.push({
-      id,
-      name,
-      type: 'sidewalk',
-      direction: 'forward',
-      orientation: 'turn',
-      widthMeters: 2.6,
-      renderHeightPx: 24,
-      yOffsetPx: p0.y,
-      length: lengthMeters,
-      curve,
-      vehicles: [],
-      nextLanes: [],
-      stopLine,
-      speedLimitKmh: 5,
-    });
-  };
-
-  // West Crosswalk (South Sidewalk -> North Sidewalk along West crosswalk at x = stopX_EB - 6)
-  addPedCrosswalk(
+  // --- 3. Pedestrian Crosswalk Movements (Walking strictly on sidewalks and crosswalks) ---
+  // West Crosswalk (South Sidewalk -> North Sidewalk)
+  addPiecewiseTurnLane(
     'walk_turn_w_n',
     'West Crosswalk Northbound',
+    'sidewalk',
+    'forward',
     { x: leftX, y: yWalkEB },
     { x: stopX_EB - 6, y: yWalkEB },
     { x: stopX_EB - 6, y: yWalkWB },
     { x: leftX, y: yWalkWB },
-    stopDistEW,
+    {
+      p0: { x: stopX_EB - 6, y: yWalkEB },
+      p1: { x: stopX_EB - 6, y: centerY + 20 },
+      p2: { x: stopX_EB - 6, y: centerY - 20 },
+      p3: { x: stopX_EB - 6, y: yWalkWB },
+    },
+    5,
   );
+
   // West Crosswalk Southbound (North Sidewalk -> South Sidewalk)
-  addPedCrosswalk(
+  addPiecewiseTurnLane(
     'walk_turn_w_s',
     'West Crosswalk Southbound',
+    'sidewalk',
+    'forward',
     { x: leftX, y: yWalkWB },
     { x: stopX_EB - 6, y: yWalkWB },
     { x: xWalkSB, y: stopY_NB + 6 },
     { x: xWalkSB, y: bottomY },
-    stopDistEW,
+    {
+      p0: { x: stopX_EB - 6, y: yWalkWB },
+      p1: { x: stopX_EB - 6, y: centerY },
+      p2: { x: xWalkSB, y: centerY + 40 },
+      p3: { x: xWalkSB, y: stopY_NB + 6 },
+    },
+    5,
   );
 
-  // East Crosswalk (North Sidewalk -> South Sidewalk along East crosswalk at x = stopX_WB + 6)
-  addPedCrosswalk(
+  // East Crosswalk (North Sidewalk -> South Sidewalk)
+  addPiecewiseTurnLane(
     'walk_turn_e_s',
     'East Crosswalk Southbound',
+    'sidewalk',
+    'forward',
     { x: rightX, y: yWalkWB },
     { x: stopX_WB + 6, y: yWalkWB },
     { x: stopX_WB + 6, y: yWalkEB },
     { x: rightX, y: yWalkEB },
-    stopDistEW,
+    {
+      p0: { x: stopX_WB + 6, y: yWalkWB },
+      p1: { x: stopX_WB + 6, y: centerY - 20 },
+      p2: { x: stopX_WB + 6, y: centerY + 20 },
+      p3: { x: stopX_WB + 6, y: yWalkEB },
+    },
+    5,
   );
+
   // East Crosswalk Northbound
-  addPedCrosswalk(
+  addPiecewiseTurnLane(
     'walk_turn_e_n',
     'East Crosswalk Northbound',
+    'sidewalk',
+    'forward',
     { x: rightX, y: yWalkEB },
     { x: stopX_WB + 6, y: yWalkEB },
     { x: xWalkNB, y: stopY_SB - 6 },
     { x: xWalkNB, y: topY },
-    stopDistEW,
+    {
+      p0: { x: stopX_WB + 6, y: yWalkEB },
+      p1: { x: stopX_WB + 6, y: centerY },
+      p2: { x: xWalkNB, y: centerY - 40 },
+      p3: { x: xWalkNB, y: stopY_SB - 6 },
+    },
+    5,
   );
 
-  // North Crosswalk (West Sidewalk -> East Sidewalk along North crosswalk at y = stopY_SB - 6)
-  addPedCrosswalk(
+  // North Crosswalk (West Sidewalk -> East Sidewalk)
+  addPiecewiseTurnLane(
     'walk_turn_n_e',
     'North Crosswalk Eastbound',
+    'sidewalk',
+    'forward',
     { x: xWalkSB, y: topY },
     { x: xWalkSB, y: stopY_SB - 6 },
     { x: xWalkNB, y: stopY_SB - 6 },
     { x: xWalkNB, y: topY },
-    stopDistNS,
+    {
+      p0: { x: xWalkSB, y: stopY_SB - 6 },
+      p1: { x: centerX - 20, y: stopY_SB - 6 },
+      p2: { x: centerX + 20, y: stopY_SB - 6 },
+      p3: { x: xWalkNB, y: stopY_SB - 6 },
+    },
+    5,
   );
-  addPedCrosswalk(
+
+  addPiecewiseTurnLane(
     'walk_turn_n_w',
     'North Crosswalk Westbound',
+    'sidewalk',
+    'forward',
     { x: xWalkNB, y: topY },
     { x: xWalkNB, y: stopY_SB - 6 },
     { x: stopX_EB - 6, y: yWalkWB },
     { x: leftX, y: yWalkWB },
-    stopDistNS,
+    {
+      p0: { x: xWalkNB, y: stopY_SB - 6 },
+      p1: { x: centerX, y: stopY_SB - 6 },
+      p2: { x: stopX_EB - 6, y: centerY - 40 },
+      p3: { x: stopX_EB - 6, y: yWalkWB },
+    },
+    5,
   );
 
-  // South Crosswalk (East Sidewalk -> West Sidewalk along South crosswalk at y = stopY_NB + 6)
-  addPedCrosswalk(
+  // South Crosswalk (East Sidewalk -> West Sidewalk)
+  addPiecewiseTurnLane(
     'walk_turn_s_w',
     'South Crosswalk Westbound',
+    'sidewalk',
+    'forward',
     { x: xWalkNB, y: bottomY },
     { x: xWalkNB, y: stopY_NB + 6 },
     { x: xWalkSB, y: stopY_NB + 6 },
     { x: xWalkSB, y: bottomY },
-    stopDistNS,
+    {
+      p0: { x: xWalkNB, y: stopY_NB + 6 },
+      p1: { x: centerX + 20, y: stopY_NB + 6 },
+      p2: { x: centerX - 20, y: stopY_NB + 6 },
+      p3: { x: xWalkSB, y: stopY_NB + 6 },
+    },
+    5,
   );
-  addPedCrosswalk(
+
+  addPiecewiseTurnLane(
     'walk_turn_s_e',
     'South Crosswalk Eastbound',
+    'sidewalk',
+    'forward',
     { x: xWalkSB, y: bottomY },
     { x: xWalkSB, y: stopY_NB + 6 },
     { x: stopX_WB + 6, y: yWalkEB },
     { x: rightX, y: yWalkEB },
-    stopDistNS,
+    {
+      p0: { x: xWalkSB, y: stopY_NB + 6 },
+      p1: { x: centerX, y: stopY_NB + 6 },
+      p2: { x: stopX_WB + 6, y: centerY + 40 },
+      p3: { x: stopX_WB + 6, y: yWalkEB },
+    },
+    5,
   );
 
   return { lanes, totalWidth: worldW, totalHeight: worldH };

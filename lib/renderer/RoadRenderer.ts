@@ -1,21 +1,8 @@
-// High-Fidelity Canvas Road Renderer for Real-World 4-Way Urban Crossroads
+// High-Fidelity Canvas Road Renderer for Multi-Lane Urban Corridors with Dedicated Turn Bays
 
-import { LaneSegment, evaluateBezierFull } from '../simulation/Network';
+import { LaneSegment, evaluateLanePosition } from '../simulation/Network';
 import { TrafficSignal } from '../simulation/TrafficSignal';
 import { IntersectionConfig } from '../types/street';
-
-const LANE_ASPHALT_COLORS: Record<string, string> = {
-  sidewalk: '#E2E8F0',     // Light concrete sidewalk
-  bike: '#059669',         // Protected green bike lane
-  motor: '#1E293B',        // Dark asphalt
-  transit: '#7C2D12',      // Red transit priority pavement
-  parking: '#334155',      // Parking shoulder asphalt
-  turn_left: '#1E293B',
-  turn_right: '#1E293B',
-  center_turn: '#1E293B',
-  median: '#166534',       // Green vegetative median
-  shared: '#D97706',       // Amber cobblestone shared street
-};
 
 export function drawRoads(
   ctx: CanvasRenderingContext2D,
@@ -29,7 +16,7 @@ export function drawRoads(
   ctx.fillStyle = '#090D16';
   ctx.fillRect(0, 0, worldWidth, worldHeight);
 
-  ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+  ctx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
   ctx.lineWidth = 1;
   const gridSize = 100;
   for (let x = 0; x <= worldWidth; x += gridSize) {
@@ -49,259 +36,256 @@ export function drawRoads(
 
   const centerX = worldWidth / 2;
   const centerY = worldHeight / 2;
-  const coreHalfSize = 100; // 100px intersection radius
+  const coreHalfSize = 100; // 100px radius of crossroads junction box
 
-  // 2. Draw Continuous Straight Pavement Surfaces (East-West & North-South corridors)
-  const throughLanes = lanes.filter((l) => l.orientation !== 'turn');
+  const leftX = 40;
+  const rightX = worldWidth - 40;
+  const topY = 40;
+  const bottomY = worldHeight - 40;
 
-  for (const lane of throughLanes) {
-    const halfH = lane.renderHeightPx / 2;
-    ctx.fillStyle = LANE_ASPHALT_COLORS[lane.type] || '#1E293B';
+  // 2. Draw Full Continuous Asphalt Base for East-West and North-South Boulevards
+  // East-West Asphalt Roadbed (y: centerY - 95 to centerY + 95)
+  ctx.fillStyle = '#1E293B';
+  ctx.fillRect(leftX, centerY - 95, rightX - leftX, 190);
 
+  // North-South Asphalt Roadbed (x: centerX - 95 to centerX + 95)
+  ctx.fillRect(centerX - 95, topY, 190, bottomY - topY);
+
+  // 3. Draw Sidewalks (Light concrete ribbons on outer perimeter)
+  ctx.fillStyle = '#E2E8F0';
+  // North Sidewalk (EW)
+  ctx.fillRect(leftX, centerY - 95, rightX - leftX, 22);
+  // South Sidewalk (EW)
+  ctx.fillRect(leftX, centerY + 73, rightX - leftX, 22);
+  // West Sidewalk (NS)
+  ctx.fillRect(centerX - 95, topY, 22, bottomY - topY);
+  // East Sidewalk (NS)
+  ctx.fillRect(centerX + 73, topY, 22, bottomY - topY);
+
+  // Sidewalk scoring pavers
+  ctx.strokeStyle = '#CBD5E1';
+  ctx.lineWidth = 1;
+  for (let x = leftX; x < rightX; x += 22) {
     ctx.beginPath();
-    const steps = 30;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const pt = evaluateBezierFull(lane.curve, t);
-      const perpAngle = pt.angle + Math.PI / 2;
-      const ox = pt.x + Math.cos(perpAngle) * halfH;
-      const oy = pt.y + Math.sin(perpAngle) * halfH;
-      if (i === 0) ctx.moveTo(ox, oy);
-      else ctx.lineTo(ox, oy);
-    }
-    for (let i = steps; i >= 0; i--) {
-      const t = i / steps;
-      const pt = evaluateBezierFull(lane.curve, t);
-      const perpAngle = pt.angle - Math.PI / 2;
-      const ox = pt.x + Math.cos(perpAngle) * halfH;
-      const oy = pt.y + Math.sin(perpAngle) * halfH;
-      ctx.lineTo(ox, oy);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Sidewalk paver grid pattern
-    if (lane.type === 'sidewalk') {
-      ctx.strokeStyle = '#CBD5E1';
-      ctx.lineWidth = 1;
-      const p0 = lane.curve.p0;
-      const p3 = lane.curve.p3;
-      if (lane.orientation === 'vertical') {
-        const minY = Math.min(p0.y, p3.y);
-        const maxY = Math.max(p0.y, p3.y);
-        for (let y = minY; y < maxY; y += 22) {
-          ctx.beginPath();
-          ctx.moveTo((lane.xOffsetPx || centerX) - halfH, y);
-          ctx.lineTo((lane.xOffsetPx || centerX) + halfH, y);
-          ctx.stroke();
-        }
-      } else {
-        const minX = Math.min(p0.x, p3.x);
-        const maxX = Math.max(p0.x, p3.x);
-        for (let x = minX; x < maxX; x += 22) {
-          ctx.beginPath();
-          ctx.moveTo(x, lane.yOffsetPx - halfH);
-          ctx.lineTo(x, lane.yOffsetPx + halfH);
-          ctx.stroke();
-        }
-      }
-    }
-
-    // Bike lane green stencil markers
-    if (lane.type === 'bike') {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.font = '13px sans-serif';
-      ctx.textAlign = 'center';
-      const p0 = lane.curve.p0;
-      const p3 = lane.curve.p3;
-      if (lane.orientation === 'vertical') {
-        const minY = Math.min(p0.y, p3.y);
-        const maxY = Math.max(p0.y, p3.y);
-        for (let y = minY + 80; y < maxY; y += 240) {
-          ctx.fillText('🚲', lane.xOffsetPx || centerX, y + 4);
-        }
-      } else {
-        const minX = Math.min(p0.x, p3.x);
-        const maxX = Math.max(p0.x, p3.x);
-        for (let x = minX + 80; x < maxX; x += 240) {
-          ctx.fillText('🚲', x, lane.yOffsetPx + 4);
-        }
-      }
-    }
+    ctx.moveTo(x, centerY - 95); ctx.lineTo(x, centerY - 73);
+    ctx.moveTo(x, centerY + 73); ctx.lineTo(x, centerY + 95);
+    ctx.stroke();
+  }
+  for (let y = topY; y < bottomY; y += 22) {
+    ctx.beginPath();
+    ctx.moveTo(centerX - 95, y); ctx.lineTo(centerX - 73, y);
+    ctx.moveTo(centerX + 73, y); ctx.lineTo(centerX + 95, y);
+    ctx.stroke();
   }
 
-  // 3. Central 4-Way Crossroads Asphalt Junction Box
+  // 4. Draw Protected Green Bike Lanes
+  ctx.fillStyle = '#059669';
+  // WB Bike Lane (North side)
+  ctx.fillRect(leftX, centerY - 73, rightX - leftX, 18);
+  // EB Bike Lane (South side)
+  ctx.fillRect(leftX, centerY + 55, rightX - leftX, 18);
+  // SB Bike Lane (West side)
+  ctx.fillRect(centerX - 73, topY, 18, bottomY - topY);
+  // NB Bike Lane (East side)
+  ctx.fillRect(centerX + 55, topY, 18, bottomY - topY);
+
+  // Bike lane stencil icons
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  for (let x = leftX + 120; x < rightX - 120; x += 240) {
+    ctx.fillText('🚲', x, centerY - 60);
+    ctx.fillText('🚲', x, centerY + 68);
+  }
+  for (let y = topY + 120; y < bottomY - 120; y += 240) {
+    ctx.fillText('🚲', centerX - 64, y + 4);
+    ctx.fillText('🚲', centerX + 64, y + 4);
+  }
+
+  // 5. Draw White Dashed Lane Dividers for Motor Lanes & Turn Pocket Bays
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 12]);
+
+  // EW Corridor Lane Dividers (West Approach)
+  // Between Right Turn and Through (y = centerY - 34 and y = centerY + 34)
+  ctx.beginPath();
+  ctx.moveTo(leftX, centerY - 34); ctx.lineTo(centerX - coreHalfSize, centerY - 34);
+  ctx.moveTo(leftX, centerY + 34); ctx.lineTo(centerX - coreHalfSize, centerY + 34);
+  // Between Through and Left Turn (y = centerY - 16 and y = centerY + 16)
+  ctx.moveTo(leftX, centerY - 16); ctx.lineTo(centerX - coreHalfSize, centerY - 16);
+  ctx.moveTo(leftX, centerY + 16); ctx.lineTo(centerX - coreHalfSize, centerY + 16);
+  ctx.stroke();
+
+  // EW Corridor Lane Dividers (East Approach)
+  ctx.beginPath();
+  ctx.moveTo(centerX + coreHalfSize, centerY - 34); ctx.lineTo(rightX, centerY - 34);
+  ctx.moveTo(centerX + coreHalfSize, centerY + 34); ctx.lineTo(rightX, centerY + 34);
+  ctx.moveTo(centerX + coreHalfSize, centerY - 16); ctx.lineTo(rightX, centerY - 16);
+  ctx.moveTo(centerX + coreHalfSize, centerY + 16); ctx.lineTo(rightX, centerY + 16);
+  ctx.stroke();
+
+  // NS Corridor Lane Dividers (North Approach)
+  ctx.beginPath();
+  ctx.moveTo(centerX - 34, topY); ctx.lineTo(centerX - 34, centerY - coreHalfSize);
+  ctx.moveTo(centerX + 34, topY); ctx.lineTo(centerX + 34, centerY - coreHalfSize);
+  ctx.moveTo(centerX - 16, topY); ctx.lineTo(centerX - 16, centerY - coreHalfSize);
+  ctx.moveTo(centerX + 16, topY); ctx.lineTo(centerX + 16, centerY - coreHalfSize);
+  ctx.stroke();
+
+  // NS Corridor Lane Dividers (South Approach)
+  ctx.beginPath();
+  ctx.moveTo(centerX - 34, centerY + coreHalfSize); ctx.lineTo(centerX - 34, bottomY);
+  ctx.moveTo(centerX + 34, centerY + coreHalfSize); ctx.lineTo(centerX + 34, bottomY);
+  ctx.moveTo(centerX - 16, centerY + coreHalfSize); ctx.lineTo(centerX - 16, bottomY);
+  ctx.moveTo(centerX + 16, centerY + coreHalfSize); ctx.lineTo(centerX + 16, bottomY);
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+
+  // 6. Central 4-Way Crossroads Junction Box
   ctx.fillStyle = '#1E293B';
   ctx.fillRect(centerX - coreHalfSize, centerY - coreHalfSize, coreHalfSize * 2, coreHalfSize * 2);
 
-  // 4. Center Medians & Concrete Pedestrian Refuge Islands (Dividing opposing traffic)
+  // 7. Center Medians & Concrete Pedestrian Refuge Islands (Dividing opposing traffic directions)
   ctx.fillStyle = '#166534'; // Vegetative grass green
-  ctx.strokeStyle = '#94A3B8'; // Concrete curb border
+  ctx.strokeStyle = '#FACC15'; // Yellow curb border
   ctx.lineWidth = 1.5;
 
-  // West Median
-  ctx.fillRect(40, centerY - 4, centerX - coreHalfSize - 40 - 15, 8);
-  ctx.strokeRect(40, centerY - 4, centerX - coreHalfSize - 40 - 15, 8);
+  // West Median (y = centerY ± 3)
+  ctx.fillRect(leftX, centerY - 3, centerX - coreHalfSize - leftX - 12, 6);
+  ctx.strokeRect(leftX, centerY - 3, centerX - coreHalfSize - leftX - 12, 6);
 
   // East Median
-  ctx.fillRect(centerX + coreHalfSize + 15, centerY - 4, worldWidth - 40 - (centerX + coreHalfSize + 15), 8);
-  ctx.strokeRect(centerX + coreHalfSize + 15, centerY - 4, worldWidth - 40 - (centerX + coreHalfSize + 15), 8);
+  ctx.fillRect(centerX + coreHalfSize + 12, centerY - 3, rightX - (centerX + coreHalfSize + 12), 6);
+  ctx.strokeRect(centerX + coreHalfSize + 12, centerY - 3, rightX - (centerX + coreHalfSize + 12), 6);
 
-  // North Median
-  ctx.fillRect(centerX - 4, 40, 8, centerY - coreHalfSize - 40 - 15);
-  ctx.strokeRect(centerX - 4, 40, 8, centerY - coreHalfSize - 40 - 15);
+  // North Median (x = centerX ± 3)
+  ctx.fillRect(centerX - 3, topY, 6, centerY - coreHalfSize - topY - 12);
+  ctx.strokeRect(centerX - 3, topY, 6, centerY - coreHalfSize - topY - 12);
 
   // South Median
-  ctx.fillRect(centerX - 4, centerY + coreHalfSize + 15, 8, worldHeight - 40 - (centerY + coreHalfSize + 15));
-  ctx.strokeRect(centerX - 4, centerY + coreHalfSize + 15, 8, worldHeight - 40 - (centerY + coreHalfSize + 15));
+  ctx.fillRect(centerX - 3, centerY + coreHalfSize + 12, 6, bottomY - (centerY + coreHalfSize + 12));
+  ctx.strokeRect(centerX - 3, centerY + coreHalfSize + 12, 6, bottomY - (centerY + coreHalfSize + 12));
 
-  // Pedestrian Refuge Island Cut-Throughs in the center of crosswalks
+  // Concrete Pedestrian Refuge Island Cut-Throughs at Crosswalks
   ctx.fillStyle = '#E2E8F0';
-  ctx.strokeStyle = '#FACC15'; // Yellow tactile warning strips
+  ctx.strokeStyle = '#FACC15';
   ctx.lineWidth = 1.5;
 
-  ctx.fillRect(centerX - coreHalfSize - 15, centerY - 5, 12, 10);
-  ctx.strokeRect(centerX - coreHalfSize - 15, centerY - 5, 12, 10);
+  ctx.fillRect(centerX - coreHalfSize - 12, centerY - 5, 10, 10);
+  ctx.strokeRect(centerX - coreHalfSize - 12, centerY - 5, 10, 10);
 
-  ctx.fillRect(centerX + coreHalfSize + 3, centerY - 5, 12, 10);
-  ctx.strokeRect(centerX + coreHalfSize + 3, centerY - 5, 12, 10);
+  ctx.fillRect(centerX + coreHalfSize + 2, centerY - 5, 10, 10);
+  ctx.strokeRect(centerX + coreHalfSize + 2, centerY - 5, 10, 10);
 
-  ctx.fillRect(centerX - 5, centerY - coreHalfSize - 15, 10, 12);
-  ctx.strokeRect(centerX - 5, centerY - coreHalfSize - 15, 10, 12);
+  ctx.fillRect(centerX - 5, centerY - coreHalfSize - 12, 10, 10);
+  ctx.strokeRect(centerX - 5, centerY - coreHalfSize - 12, 10, 10);
 
-  ctx.fillRect(centerX - 5, centerY + coreHalfSize + 3, 10, 12);
-  ctx.strokeRect(centerX - 5, centerY + coreHalfSize + 3, 10, 12);
+  ctx.fillRect(centerX - 5, centerY + coreHalfSize + 2, 10, 10);
+  ctx.strokeRect(centerX - 5, centerY + coreHalfSize + 2, 10, 10);
 
-  // 5. Corner Curb Islands on the 4 Corners (Protecting crosswalks)
+  // Corner Curb Bulb-Out Islands
   ctx.fillStyle = '#CBD5E1';
   ctx.strokeStyle = '#64748B';
   ctx.lineWidth = 1.5;
 
   ctx.beginPath();
   ctx.arc(centerX - coreHalfSize, centerY - coreHalfSize, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fill(); ctx.stroke();
 
   ctx.beginPath();
   ctx.arc(centerX + coreHalfSize, centerY - coreHalfSize, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fill(); ctx.stroke();
 
   ctx.beginPath();
   ctx.arc(centerX - coreHalfSize, centerY + coreHalfSize, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fill(); ctx.stroke();
 
   ctx.beginPath();
   ctx.arc(centerX + coreHalfSize, centerY + coreHalfSize, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fill(); ctx.stroke();
 
-  // 6. Right-Hand Traffic Pavement Turn Stencils (Cleanly painted before stop lines)
+  // 8. Painted Pavement Turn Stencils (Clear White Arrows inside each dedicated lane)
   ctx.font = 'bold 13px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
 
-  // Westbound Approach Arrows (North half, x = centerX + coreHalfSize + 50)
-  ctx.fillText('⮠', centerX + coreHalfSize + 50, centerY - 46); // Right turn
-  ctx.fillText('⮜', centerX + coreHalfSize + 50, centerY - 24); // Through
-  ctx.fillText('⮧', centerX + coreHalfSize + 50, centerY - 7);  // Left turn
+  // Eastbound Approach Lanes (South half, x = centerX - coreHalfSize - 50)
+  ctx.fillText('⮤', centerX - coreHalfSize - 50, centerY + 8);  // Left turn bay
+  ctx.fillText('⮞', centerX - coreHalfSize - 50, centerY + 24); // Through lane
+  ctx.fillText('⮡', centerX - coreHalfSize - 50, centerY + 44); // Right turn bay
 
-  // Eastbound Approach Arrows (South half, x = centerX - coreHalfSize - 50)
-  ctx.fillText('⮤', centerX - coreHalfSize - 50, centerY + 7);  // Left turn
-  ctx.fillText('⮞', centerX - coreHalfSize - 50, centerY + 24); // Through
-  ctx.fillText('⮡', centerX - coreHalfSize - 50, centerY + 46); // Right turn
+  // Westbound Approach Lanes (North half, x = centerX + coreHalfSize + 50)
+  ctx.fillText('⮠', centerX + coreHalfSize + 50, centerY - 44); // Right turn bay
+  ctx.fillText('⮜', centerX + coreHalfSize + 50, centerY - 24); // Through lane
+  ctx.fillText('⮧', centerX + coreHalfSize + 50, centerY - 8);  // Left turn bay
 
-  // Southbound Approach Arrows (West half, y = centerY - coreHalfSize - 50)
-  ctx.fillText('⮤', centerX - 46, centerY - coreHalfSize - 50); // Right turn
-  ctx.fillText('⮟', centerX - 24, centerY - coreHalfSize - 50); // Through
-  ctx.fillText('⮡', centerX - 7, centerY - coreHalfSize - 50);  // Left turn
+  // Southbound Approach Lanes (West half, y = centerY - coreHalfSize - 50)
+  ctx.fillText('⮤', centerX - 44, centerY - coreHalfSize - 50); // Right turn bay
+  ctx.fillText('⮟', centerX - 24, centerY - coreHalfSize - 50); // Through lane
+  ctx.fillText('⮡', centerX - 8, centerY - coreHalfSize - 50);  // Left turn bay
 
-  // Northbound Approach Arrows (East half, y = centerY + coreHalfSize + 50)
-  ctx.fillText('⮠', centerX + 7, centerY + coreHalfSize + 50);  // Left turn
-  ctx.fillText('⮝', centerX + 24, centerY + coreHalfSize + 50); // Through
-  ctx.fillText('⮧', centerX + 46, centerY + coreHalfSize + 50); // Right turn
+  // Northbound Approach Lanes (East half, y = centerY + coreHalfSize + 50)
+  ctx.fillText('⮠', centerX + 8, centerY + coreHalfSize + 50);  // Left turn bay
+  ctx.fillText('⮝', centerX + 24, centerY + coreHalfSize + 50); // Through lane
+  ctx.fillText('⮧', centerX + 44, centerY + coreHalfSize + 50); // Right turn bay
 
-  // 7. Stop Bars & High-Visibility Zebra Crosswalks on all 4 approaches
+  // 9. Stop Bars & High-Visibility Zebra Crosswalks across all 4 road mouths
   const primaryIntersection = intersections[0];
 
-  for (const lane of throughLanes) {
-    if (lane.stopLine !== undefined) {
-      const t = Math.max(0, Math.min(1, lane.stopLine / lane.length));
-      const pt = evaluateBezierFull(lane.curve, t);
-      const halfH = lane.renderHeightPx / 2;
+  // Draw 4 Zebra Crosswalks (West, East, North, South)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
 
-      let lightColor: 'green' | 'yellow' | 'red' = 'green';
-      for (const sig of signals) {
-        lightColor = sig.getSignalStateForLane(lane.id);
-        if (lightColor !== 'green') break;
-      }
-
-      if (lane.type === 'sidewalk') {
-        ctx.strokeStyle = lightColor === 'green' ? '#22C55E' : '#EF4444';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        if (lane.orientation === 'vertical') {
-          ctx.moveTo(pt.x - halfH, pt.y);
-          ctx.lineTo(pt.x + halfH, pt.y);
-        } else {
-          ctx.moveTo(pt.x, pt.y - halfH);
-          ctx.lineTo(pt.x, pt.y + halfH);
-        }
-        ctx.stroke();
-      } else {
-        const stopLineColor =
-          primaryIntersection?.type === 'stop'
-            ? '#EF4444'
-            : lightColor === 'red'
-            ? '#EF4444'
-            : lightColor === 'yellow'
-            ? '#FACC15'
-            : '#22C55E';
-
-        ctx.strokeStyle = stopLineColor;
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        if (lane.orientation === 'vertical') {
-          ctx.moveTo(pt.x - halfH, pt.y);
-          ctx.lineTo(pt.x + halfH, pt.y);
-        } else {
-          ctx.moveTo(pt.x, pt.y - halfH);
-          ctx.lineTo(pt.x, pt.y + halfH);
-        }
-        ctx.stroke();
-
-        // Zebra stripes across the roadway
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        if (lane.orientation === 'vertical') {
-          for (let cx = pt.x - halfH + 3; cx < pt.x + halfH - 3; cx += 8) {
-            const offset = lane.direction === 'reverse' ? 2 : -10;
-            ctx.fillRect(cx, pt.y + offset, 4, 8);
-          }
-        } else {
-          for (let cy = pt.y - halfH + 3; cy < pt.y + halfH - 3; cy += 8) {
-            const offset = lane.direction === 'reverse' ? -10 : 2;
-            ctx.fillRect(pt.x + offset, cy, 8, 4);
-          }
-        }
-      }
-    }
+  // West Crosswalk (x = centerX - coreHalfSize - 8)
+  for (let y = centerY - 72; y <= centerY + 72; y += 8) {
+    ctx.fillRect(centerX - coreHalfSize - 10, y, 8, 4);
+  }
+  // East Crosswalk (x = centerX + coreHalfSize + 2)
+  for (let y = centerY - 72; y <= centerY + 72; y += 8) {
+    ctx.fillRect(centerX + coreHalfSize + 2, y, 8, 4);
+  }
+  // North Crosswalk (y = centerY - coreHalfSize - 10)
+  for (let x = centerX - 72; x <= centerX + 72; x += 8) {
+    ctx.fillRect(x, centerY - coreHalfSize - 10, 4, 8);
+  }
+  // South Crosswalk (y = centerY + coreHalfSize + 2)
+  for (let x = centerX - 72; x <= centerX + 72; x += 8) {
+    ctx.fillRect(x, centerY + coreHalfSize + 2, 4, 8);
   }
 
-  // 8. 4 Master Traffic Signal Heads
+  // Draw Stop Lines at intersection approach
+  const drawStopBar = (x1: number, y1: number, x2: number, y2: number, color: string) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+
+  const sig = signals[0];
+  const ebThrough = sig?.getSignalStateForLane('travel_eb_1') || 'green';
+  const wbThrough = sig?.getSignalStateForLane('travel_wb_1') || 'green';
+  const sbThrough = sig?.getSignalStateForLane('ns_travel_sb') || 'green';
+  const nbThrough = sig?.getSignalStateForLane('ns_travel_nb') || 'green';
+
+  const stopColor = (c: string) => (c === 'red' ? '#EF4444' : c === 'yellow' ? '#FACC15' : '#22C55E');
+
+  // EB Stop Bar (South half)
+  drawStopBar(centerX - coreHalfSize, centerY + 2, centerX - coreHalfSize, centerY + 54, stopColor(ebThrough));
+  // WB Stop Bar (North half)
+  drawStopBar(centerX + coreHalfSize, centerY - 54, centerX + coreHalfSize, centerY - 2, stopColor(wbThrough));
+  // SB Stop Bar (West half)
+  drawStopBar(centerX - 54, centerY - coreHalfSize, centerX - 2, centerY - coreHalfSize, stopColor(sbThrough));
+  // NB Stop Bar (East half)
+  drawStopBar(centerX + 2, centerY + coreHalfSize, centerX + 54, centerY + coreHalfSize, stopColor(nbThrough));
+
+  // 10. Traffic Signal Heads (Round Mast Heads + Left Turn Arrows)
   if (primaryIntersection?.type === 'lights' && signals.length > 0) {
-    const sig = signals[0];
-
-    const ebThrough = sig.getSignalStateForLane('travel_eb_1');
     const ebLeft = sig.getSignalStateForLane('turn_left_eb');
-
-    const wbThrough = sig.getSignalStateForLane('travel_wb_1');
     const wbLeft = sig.getSignalStateForLane('turn_left_wb');
-
-    const sbThrough = sig.getSignalStateForLane('ns_travel_sb');
     const sbLeft = sig.getSignalStateForLane('turn_left_sb');
-
-    const nbThrough = sig.getSignalStateForLane('ns_travel_nb');
     const nbLeft = sig.getSignalStateForLane('turn_left_nb');
 
     const ebPedState = sig.getSignalStateForLane('sidewalk_eb');
@@ -310,29 +294,29 @@ export function drawRoads(
     const nbPedState = sig.getSignalStateForLane('ns_walk_nb');
 
     // West Approach Signal (facing EB, on South side)
-    drawSignalHead(ctx, centerX - coreHalfSize - 12, centerY + 30, ebThrough, 'vertical');
-    drawTurnArrowSignal(ctx, centerX - coreHalfSize - 12, centerY + 7, ebLeft === 'green');
+    drawSignalHead(ctx, centerX - coreHalfSize - 14, centerY + 30, ebThrough, 'vertical');
+    drawTurnArrowSignal(ctx, centerX - coreHalfSize - 14, centerY + 8, ebLeft === 'green');
 
     // East Approach Signal (facing WB, on North side)
-    drawSignalHead(ctx, centerX + coreHalfSize + 12, centerY - 30, wbThrough, 'vertical');
-    drawTurnArrowSignal(ctx, centerX + coreHalfSize + 12, centerY - 7, wbLeft === 'green');
+    drawSignalHead(ctx, centerX + coreHalfSize + 14, centerY - 30, wbThrough, 'vertical');
+    drawTurnArrowSignal(ctx, centerX + coreHalfSize + 14, centerY - 8, wbLeft === 'green');
 
     // North Approach Signal (facing SB, on West side)
-    drawSignalHead(ctx, centerX - 30, centerY - coreHalfSize - 12, sbThrough, 'horizontal');
-    drawTurnArrowSignal(ctx, centerX - 7, centerY - coreHalfSize - 12, sbLeft === 'green');
+    drawSignalHead(ctx, centerX - 30, centerY - coreHalfSize - 14, sbThrough, 'horizontal');
+    drawTurnArrowSignal(ctx, centerX - 8, centerY - coreHalfSize - 14, sbLeft === 'green');
 
     // South Approach Signal (facing NB, on East side)
-    drawSignalHead(ctx, centerX + 30, centerY + coreHalfSize + 12, nbThrough, 'horizontal');
-    drawTurnArrowSignal(ctx, centerX + 7, centerY + coreHalfSize + 12, nbLeft === 'green');
+    drawSignalHead(ctx, centerX + 30, centerY + coreHalfSize + 14, nbThrough, 'horizontal');
+    drawTurnArrowSignal(ctx, centerX + 8, centerY + coreHalfSize + 14, nbLeft === 'green');
 
     // Pedestrian Walk / Don't Walk Heads on the 4 Corner Curbs
-    drawPedestrianSignal(ctx, centerX - coreHalfSize - 12, centerY - 80, wbPedState === 'green');
-    drawPedestrianSignal(ctx, centerX + coreHalfSize + 12, centerY + 80, ebPedState === 'green');
-    drawPedestrianSignal(ctx, centerX + 80, centerY - coreHalfSize - 12, nbPedState === 'green');
-    drawPedestrianSignal(ctx, centerX - 80, centerY + coreHalfSize + 12, sbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX - coreHalfSize - 14, centerY - 84, wbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX + coreHalfSize + 14, centerY + 84, ebPedState === 'green');
+    drawPedestrianSignal(ctx, centerX + 84, centerY - coreHalfSize - 14, nbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX - 84, centerY + coreHalfSize + 14, sbPedState === 'green');
   }
 
-  // 9. Glowing 4-Side Perimeter Ingress & Outgress Portals
+  // 11. Glowing 4-Side Perimeter Ingress & Outgress Portals
   drawPortalBadge(ctx, 40, centerY, 'WEST PORTAL', 'Ingress (EB) · Outgress (WB)', '#3B82F6', 'left');
   drawPortalBadge(ctx, worldWidth - 40, centerY, 'EAST PORTAL', 'Ingress (WB) · Outgress (EB)', '#10B981', 'right');
   drawPortalBadge(ctx, centerX, 40, 'NORTH PORTAL', 'Ingress (SB) · Outgress (NB)', '#F59E0B', 'top');

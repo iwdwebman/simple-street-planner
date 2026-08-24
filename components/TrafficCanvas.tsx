@@ -5,7 +5,7 @@ import { ZoomIn, ZoomOut, Maximize, RotateCcw } from 'lucide-react';
 import { Engine } from '@/lib/simulation/Engine';
 import { loadVehicleSprites } from '@/lib/renderer/SpriteManager';
 import { drawRoads } from '@/lib/renderer/RoadRenderer';
-import { evaluateBezierFull, PIXELS_PER_METER, LaneSegment, DEFAULT_WORLD_WIDTH, DEFAULT_WORLD_HEIGHT } from '@/lib/simulation/Network';
+import { evaluateLanePosition, PIXELS_PER_METER, LaneSegment, DEFAULT_WORLD_WIDTH, DEFAULT_WORLD_HEIGHT } from '@/lib/simulation/Network';
 import { VehicleType, VEHICLE_CONFIGS } from '@/lib/types/vehicle';
 
 interface TrafficCanvasProps {
@@ -84,8 +84,7 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
       // 5. Draw All Active Vehicles
       for (const lane of lanes) {
         for (const vehicle of lane.vehicles) {
-          const t = Math.max(0, Math.min(1, vehicle.s / Math.max(1, lane.length)));
-          const { x, y, angle } = evaluateBezierFull(lane.curve, t);
+          const { x, y, angle } = evaluateLanePosition(lane, vehicle.s);
           const sprite = sprites[vehicle.type];
           if (!sprite) continue;
 
@@ -143,8 +142,7 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
           // Minimap vehicles
           for (const lane of lanes) {
             for (const v of lane.vehicles) {
-              const t = Math.max(0, Math.min(1, v.s / Math.max(1, lane.length)));
-              const pt = evaluateBezierFull(lane.curve, t);
+              const pt = evaluateLanePosition(lane, v.s);
               mCtx.fillStyle = VEHICLE_CONFIGS[v.type]?.color || '#3B82F6';
               mCtx.fillRect(pt.x * scaleX - 1.5, pt.y * scaleY - 1.5, 3, 3);
             }
@@ -249,8 +247,7 @@ export default function TrafficCanvas({ engine, speedMultiplier }: TrafficCanvas
 
     for (const lane of engine.lanes.values()) {
       for (const v of lane.vehicles) {
-        const t = Math.max(0, Math.min(1, v.s / Math.max(1, lane.length)));
-        const { x, y } = evaluateBezierFull(lane.curve, t);
+        const { x, y } = evaluateLanePosition(lane, v.s);
         const dist = Math.hypot(worldX - x, worldY - y);
         if (dist < hitRadius) {
           found = {
