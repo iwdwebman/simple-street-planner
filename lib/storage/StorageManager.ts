@@ -3,8 +3,8 @@
 import { PlayFile } from '../types/street';
 import { DEFAULT_SCENARIOS, SCENARIO_COMPLETE_STREET } from './defaultScenarios';
 
-const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v7';
-const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v7';
+const STORAGE_ACTIVE_PLAYFILE_KEY = 'simple_street_planner_active_playfile_v8';
+const STORAGE_CUSTOM_PLAYFILES_KEY = 'simple_street_planner_custom_playfiles_v8';
 
 export class StorageManager {
   /**

@@ -197,6 +197,50 @@ export class Engine {
           }
         }
 
+        // Dynamic Yielding: Right-turn vehicles must yield to crossing pedestrians and cyclists
+        if (lane.type === 'turn_right' && lane.stopLine !== undefined) {
+          const stopLineS = lane.stopLine;
+          if (v.s >= stopLineS - 25 && v.s <= stopLineS + 6) {
+            let conflictCrossing = false;
+
+            let conflictLaneIds: string[] = [];
+            if (lane.id === 'turn_right_eb') {
+              conflictLaneIds = ['bike_eb', 'sidewalk_eb', 'walk_turn_w_s', 'walk_turn_s_e', 'ns_bike_sb'];
+            } else if (lane.id === 'turn_right_wb') {
+              conflictLaneIds = ['bike_wb', 'sidewalk_wb', 'walk_turn_e_n', 'walk_turn_n_w', 'ns_bike_nb'];
+            } else if (lane.id === 'turn_right_sb') {
+              conflictLaneIds = ['ns_bike_sb', 'ns_walk_sb', 'walk_turn_n_w', 'walk_turn_w_s', 'bike_wb'];
+            } else if (lane.id === 'turn_right_nb') {
+              conflictLaneIds = ['ns_bike_nb', 'ns_walk_nb', 'walk_turn_s_e', 'walk_turn_e_s', 'bike_eb'];
+            }
+
+            for (const cId of conflictLaneIds) {
+              const cLane = this.lanes.get(cId);
+              if (cLane && cLane.stopLine !== undefined) {
+                const isCrossing = cLane.vehicles.some(
+                  (cv) => cv.s >= cLane.stopLine! - 3 && cv.s <= cLane.stopLine! + 18,
+                );
+                if (isCrossing) {
+                  conflictCrossing = true;
+                  break;
+                }
+              }
+            }
+
+            if (conflictCrossing) {
+              if (stopLineS < sLead) {
+                sLead = stopLineS;
+                vLead = 0;
+              }
+              if (v.s >= stopLineS - 0.5 && v.s <= stopLineS + 3.5) {
+                v.v = 0;
+                v.a = 0;
+                v.s = stopLineS - 0.5;
+              }
+            }
+          }
+        }
+
         const acc = v.computeAcceleration(sLead, vLead, targetSpeed);
         v.integrate(dt, acc);
       }

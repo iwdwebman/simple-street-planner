@@ -1,4 +1,4 @@
-// Traffic Signal Controller & 4-Stage Protected Turn Phasing Program
+// Traffic Signal Controller & 4-Stage Protected Turn Phasing with Opposing Right Turn Overlaps
 
 import { SignalPhaseConfig, SignalPresetPattern, LaneDefinition } from '../types/street';
 
@@ -106,7 +106,7 @@ export class TrafficSignal {
   }
 
   /**
-   * Generate 4-stage protected turn signal phases
+   * Generate 4-stage protected turn signal phases with opposing right-turn overlaps
    */
   static generatePresetPhases(
     pattern: SignalPresetPattern,
@@ -122,7 +122,7 @@ export class TrafficSignal {
         return [
           {
             id: 'phase_ns_through',
-            name: 'North-South Through & Right (Stage 1/4)',
+            name: 'Stage 1/4: North-South Through, Right & Ped/Bike Walk',
             greenLaneIds: [
               'ns_travel_sb', 'ns_travel_nb', 'turn_right_sb', 'turn_right_nb',
               'ns_bike_sb', 'ns_bike_nb', ...nsPedestrians,
@@ -133,15 +133,15 @@ export class TrafficSignal {
           },
           {
             id: 'phase_ns_lefts',
-            name: 'North-South Protected Left Turns (Stage 2/4)',
-            greenLaneIds: ['turn_left_sb', 'turn_left_nb'],
+            name: 'Stage 2/4: North-South Protected Lefts & Opposing Rights',
+            greenLaneIds: ['turn_left_sb', 'turn_left_nb', 'turn_right_sb', 'turn_right_nb'],
             greenDuration: 14,
             yellowDuration: 3,
             allRedDuration: 2,
           },
           {
             id: 'phase_ew_through',
-            name: 'East-West Through & Right (Stage 3/4)',
+            name: 'Stage 3/4: East-West Through, Right & Ped/Bike Walk',
             greenLaneIds: [
               'travel_eb_1', 'transit_eb', 'travel_wb_1', 'turn_right_eb', 'turn_right_wb',
               'bike_eb', 'bike_wb', ...ewPedestrians,
@@ -152,8 +152,8 @@ export class TrafficSignal {
           },
           {
             id: 'phase_ew_lefts',
-            name: 'East-West Protected Left Turns (Stage 4/4)',
-            greenLaneIds: ['turn_left_eb', 'turn_left_wb'],
+            name: 'Stage 4/4: East-West Protected Lefts & Opposing Rights',
+            greenLaneIds: ['turn_left_eb', 'turn_left_wb', 'turn_right_eb', 'turn_right_wb'],
             greenDuration: 14,
             yellowDuration: 3,
             allRedDuration: 2,
