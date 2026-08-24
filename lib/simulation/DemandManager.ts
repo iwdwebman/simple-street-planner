@@ -1,4 +1,4 @@
-// Ingress/Outgress OD Demand Manager with 24-Hour Time-of-Day Curve
+// Ingress/Outgress Stochastic Demand Manager with Clumping & Burst Physics
 
 import {
   IngressPoint,
@@ -8,6 +8,7 @@ import {
 } from '../types/street';
 import { Vehicle } from './Vehicle';
 import { LaneSegment } from './Network';
+import { VehicleType, VEHICLE_CONFIGS } from '../types/vehicle';
 
 export const DEFAULT_DIURNAL_PROFILE: TimeOfDayProfile = {
   name: 'Standard Urban Diurnal Curve',
@@ -41,7 +42,7 @@ export const DEFAULT_DIURNAL_PROFILE: TimeOfDayProfile = {
 
 export interface ActiveDemandSpawner {
   route: DemandRoute;
-  accumulator: number;
+  timeUntilNextArrival: number; // seconds until next stochastic event
 }
 
 export class DemandManager {
@@ -63,7 +64,7 @@ export class DemandManager {
     this.timeOfDayProfile = profile;
     this.spawners = routes.map((route) => ({
       route,
-      accumulator: Math.random() * 0.5,
+      timeUntilNextArrival: Math.random() * (60 / Math.max(1, route.baseRatePerMinute)),
     }));
   }
 
@@ -79,12 +80,35 @@ export class DemandManager {
     const factorA = this.timeOfDayProfile.hourlyFactors[hourFloor] ?? 1.0;
     const factorB = this.timeOfDayProfile.hourlyFactors[hourCeil] ?? 1.0;
 
-    // Linear interpolation between hours
     return factorA * (1 - frac) + factorB * frac;
   }
 
   /**
-   * Update spawners and generate new vehicles
+   * Type-specific minimum spatial clearance needed at the ingress point
+   */
+  private getMinSpawnClearance(type: VehicleType): number {
+    switch (type) {
+      case 'walker':
+        return 0.9; // Walkers can pack tightly in walking groups
+      case 'bike':
+        return 2.2; // Bikes can pack in close commuter platoons
+      case 'car':
+        return 5.8;
+      case 'delivery':
+        return 7.5;
+      case 'truck':
+        return 7.8;
+      case 'bus':
+        return 14.0;
+      case 'semi':
+        return 19.5;
+      default:
+        return 6.0;
+    }
+  }
+
+  /**
+   * Update spawners with stochastic Poisson arrival and multi-agent clumping
    */
   step(
     dt: number,
@@ -103,34 +127,59 @@ export class DemandManager {
       const lane = lanesMap.get(ingress.laneId);
       if (!lane) continue;
 
-      // Rate in vehicles per second = (trips/min / 60) * factor
-      const ratePerSec = (route.baseRatePerMinute / 60) * factor;
-      spawner.accumulator += ratePerSec * dt;
+      // Rate in events per second
+      const lambda = Math.max(0.001, (route.baseRatePerMinute / 60) * factor);
+      spawner.timeUntilNextArrival -= dt;
 
-      while (spawner.accumulator >= 1.0) {
-        spawner.accumulator -= 1.0;
+      if (spawner.timeUntilNextArrival <= 0) {
+        // Draw next stochastic inter-arrival time from exponential distribution
+        const u = Math.max(0.0001, Math.random());
+        const nextInterval = -Math.log(u) / lambda;
+        spawner.timeUntilNextArrival = Math.max(0.4, nextInterval);
 
-        // Check if lane start has clearance
-        const minClearance = 6.0; // 6m minimum gap to spawn
-        let hasClearance = true;
-        for (const v of lane.vehicles) {
-          if (v.s < minClearance) {
-            hasClearance = false;
-            break;
-          }
+        // Determine cluster / batch size (walkers and bikes clump up!)
+        let batchSize = 1;
+        const roll = Math.random();
+
+        if (route.vehicleType === 'walker') {
+          // 45% chance of walking in groups of 2 to 4
+          if (roll < 0.25) batchSize = 2;
+          else if (roll < 0.40) batchSize = 3;
+          else if (roll < 0.48) batchSize = 4;
+        } else if (route.vehicleType === 'bike') {
+          // 35% chance of cycling in packs of 2 to 3
+          if (roll < 0.25) batchSize = 2;
+          else if (roll < 0.35) batchSize = 3;
+        } else if (route.vehicleType === 'car') {
+          // 20% chance of mini-platoon pair
+          if (roll < 0.20) batchSize = 2;
         }
 
-        if (hasClearance) {
-          const vehicle = new Vehicle({
-            type: route.vehicleType,
-            laneId: lane.id,
-            s: ingress.positionMeters,
-            v: 0,
-            destinationOutgressId: route.destinationOutgressId,
-            spawnTimeSeconds: simTimeSeconds,
-          });
-          lane.vehicles.push(vehicle);
-          spawned.push(vehicle);
+        const minClearance = this.getMinSpawnClearance(route.vehicleType);
+
+        for (let b = 0; b < batchSize; b++) {
+          const spawnOffset = b * (route.vehicleType === 'walker' ? 0.7 : route.vehicleType === 'bike' ? 2.0 : 6.0);
+
+          // Check if lane mouth is clear
+          let hasClearance = true;
+          for (const v of lane.vehicles) {
+            if (v.s < minClearance + spawnOffset) {
+              hasClearance = false;
+              break;
+            }
+          }
+
+          if (hasClearance) {
+            const vehicle = new Vehicle({
+              type: route.vehicleType,
+              laneId: lane.id,
+              s: ingress.positionMeters + spawnOffset,
+              destinationOutgressId: route.destinationOutgressId,
+              spawnTimeSeconds: simTimeSeconds,
+            });
+            lane.vehicles.push(vehicle);
+            spawned.push(vehicle);
+          }
         }
       }
     }
@@ -151,7 +200,7 @@ export class DemandManager {
     this.demandRoutes = routes;
     this.spawners = routes.map((route) => ({
       route,
-      accumulator: Math.random() * 0.5,
+      timeUntilNextArrival: Math.random() * (60 / Math.max(1, route.baseRatePerMinute)),
     }));
   }
 }

@@ -1,4 +1,4 @@
-// Intelligent Driver Model (IDM) kinematics with 7 vehicle types and curvature speed limits
+// Intelligent Driver Model (IDM) Kinematics with Driver Randomization & Clumping Physics
 
 import { VehicleType, VEHICLE_CONFIGS } from '../types/vehicle';
 
@@ -6,7 +6,7 @@ export interface VehicleInitConfig {
   type: VehicleType;
   laneId: string;
   s: number;               // initial position along lane (m)
-  v: number;               // initial speed (m/s)
+  v?: number;              // initial speed (m/s) (if omitted, randomized cruising speed is computed)
   destinationOutgressId?: string;
   spawnTimeSeconds?: number;
 }
@@ -28,7 +28,7 @@ export class Vehicle {
   length: number;          // bumper-to-bumper length (m)
   width: number;           // vehicle width (m)
 
-  // IDM Physics Parameters
+  // IDM Physics Parameters (Individualized per vehicle for natural heterogeneity)
   v0: number;              // free-flow desired speed (m/s)
   aMax: number;            // max acceleration (m/s^2)
   bComf: number;           // comfortable deceleration (m/s^2)
@@ -49,19 +49,35 @@ export class Vehicle {
     this.laneId = config.laneId;
     this.destinationOutgressId = config.destinationOutgressId;
 
-    this.s = config.s;
-    this.v = Math.max(0, config.v);
-    this.a = 0;
-
     const meta = VEHICLE_CONFIGS[config.type] || VEHICLE_CONFIGS.car;
     this.length = meta.params.length;
     this.width = meta.params.width;
-    this.v0 = meta.params.v0;
-    this.aMax = meta.params.aMax;
+
+    // Individual Driver Heterogeneity (Randomization Jitter)
+    // Desired speed varies ±18% (e.g. brisk vs casual walkers, slow vs fast drivers)
+    const speedJitter = (Math.random() - 0.5) * 0.36; // -0.18 to +0.18
+    this.v0 = Math.max(0.8, meta.params.v0 * (1 + speedJitter));
+
+    // Desired time headway varies ±15% (aggressive vs cautious drivers)
+    const headwayJitter = (Math.random() - 0.5) * 0.30;
+    this.T = Math.max(0.3, meta.params.T * (1 + headwayJitter));
+
+    // Acceleration capability varies ±15%
+    const accelJitter = (Math.random() - 0.5) * 0.30;
+    this.aMax = Math.max(0.5, meta.params.aMax * (1 + accelJitter));
     this.bComf = meta.params.bComf;
-    this.T = meta.params.T;
     this.s0 = meta.params.s0;
 
+    this.s = config.s;
+    // Initial velocity: use provided speed, or natural cruising entry speed
+    if (config.v !== undefined) {
+      this.v = Math.max(0, config.v);
+    } else {
+      const entrySpeedFrac = 0.65 + Math.random() * 0.30; // 65% to 95% of desired speed
+      this.v = this.v0 * entrySpeedFrac;
+    }
+
+    this.a = 0;
     this.stopDwellTimer = 0;
     this.hasCompletedStop = false;
     this.spawnTime = config.spawnTimeSeconds ?? 0;
@@ -70,9 +86,6 @@ export class Vehicle {
 
   /**
    * Compute IDM acceleration with respect to a leading obstacle or vehicle.
-   * @param sLead Position of leader front bumper (Infinity if no obstacle)
-   * @param vLead Speed of leader (or 0 for stationary stop-line)
-   * @param vTarget Local target speed limit (considers base speed, street limit, and curvature)
    */
   computeAcceleration(sLead: number, vLead: number, vTarget: number): number {
     const effectiveV0 = Math.max(0.5, Math.min(this.v0, vTarget));
@@ -102,7 +115,6 @@ export class Vehicle {
    * Integrate kinematics forward by dt seconds.
    */
   integrate(dt: number, rawAcc: number): void {
-    // Clamp acceleration between hard braking (-8 m/s^2) and max capability
     this.a = Math.max(-8.0, Math.min(this.aMax * 1.5, rawAcc));
     this.v = Math.max(0, this.v + this.a * dt);
     const ds = this.v * dt;
@@ -115,17 +127,13 @@ export class Vehicle {
    */
   updateStopState(dt: number, isAtStopSign: boolean, requiredDwellSeconds = 2.0): boolean {
     if (!isAtStopSign) {
-      if (this.hasCompletedStop && this.s > 5) {
-        // Reset when well clear of stop line
-      }
       return false;
     }
 
     if (this.hasCompletedStop) {
-      return false; // already stopped and cleared to go
+      return false;
     }
 
-    // If speed is very low near the stop line, accumulate dwell timer
     if (this.v <= 0.3) {
       this.stopDwellTimer += dt;
       if (this.stopDwellTimer >= requiredDwellSeconds) {
@@ -134,6 +142,6 @@ export class Vehicle {
       }
     }
 
-    return true; // still needs to stay stopped
+    return true;
   }
 }
