@@ -1,4 +1,4 @@
-// High-Fidelity Canvas Road Renderer with Right-Hand Traffic, Median Islands & Pedestrian Refuges
+// High-Fidelity Canvas Road Renderer for Real-World 4-Way Urban Crossroads
 
 import { LaneSegment, evaluateBezierFull } from '../simulation/Network';
 import { TrafficSignal } from '../simulation/TrafficSignal';
@@ -49,11 +49,10 @@ export function drawRoads(
 
   const centerX = worldWidth / 2;
   const centerY = worldHeight / 2;
-  const coreHalfSize = 130;
+  const coreHalfSize = 100; // 100px intersection radius
 
-  // 2. Draw Lane Pavement Surfaces (Through corridors)
+  // 2. Draw Continuous Straight Pavement Surfaces (East-West & North-South corridors)
   const throughLanes = lanes.filter((l) => l.orientation !== 'turn');
-  const turningLanes = lanes.filter((l) => l.orientation === 'turn' && l.type !== 'sidewalk');
 
   for (const lane of throughLanes) {
     const halfH = lane.renderHeightPx / 2;
@@ -131,16 +130,16 @@ export function drawRoads(
     }
   }
 
-  // 3. Central 4-Way Crossroads Asphalt Core
+  // 3. Central 4-Way Crossroads Asphalt Junction Box
   ctx.fillStyle = '#1E293B';
   ctx.fillRect(centerX - coreHalfSize, centerY - coreHalfSize, coreHalfSize * 2, coreHalfSize * 2);
 
-  // 4. Center Medians & Concrete Pedestrian Refuge Islands (Right-Hand Traffic divider)
+  // 4. Center Medians & Concrete Pedestrian Refuge Islands (Dividing opposing traffic)
   ctx.fillStyle = '#166534'; // Vegetative grass green
   ctx.strokeStyle = '#94A3B8'; // Concrete curb border
   ctx.lineWidth = 1.5;
 
-  // West Median (from left boundary to stop line)
+  // West Median
   ctx.fillRect(40, centerY - 4, centerX - coreHalfSize - 40 - 15, 8);
   ctx.strokeRect(40, centerY - 4, centerX - coreHalfSize - 40 - 15, 8);
 
@@ -156,97 +155,74 @@ export function drawRoads(
   ctx.fillRect(centerX - 4, centerY + coreHalfSize + 15, 8, worldHeight - 40 - (centerY + coreHalfSize + 15));
   ctx.strokeRect(centerX - 4, centerY + coreHalfSize + 15, 8, worldHeight - 40 - (centerY + coreHalfSize + 15));
 
-  // Pedestrian Refuge Island Cut-Throughs (Safe concrete refuge in middle of crosswalks)
+  // Pedestrian Refuge Island Cut-Throughs in the center of crosswalks
   ctx.fillStyle = '#E2E8F0';
   ctx.strokeStyle = '#FACC15'; // Yellow tactile warning strips
   ctx.lineWidth = 1.5;
 
-  // West Refuge Island
-  ctx.fillRect(centerX - coreHalfSize - 15, centerY - 6, 12, 12);
-  ctx.strokeRect(centerX - coreHalfSize - 15, centerY - 6, 12, 12);
+  ctx.fillRect(centerX - coreHalfSize - 15, centerY - 5, 12, 10);
+  ctx.strokeRect(centerX - coreHalfSize - 15, centerY - 5, 12, 10);
 
-  // East Refuge Island
-  ctx.fillRect(centerX + coreHalfSize + 3, centerY - 6, 12, 12);
-  ctx.strokeRect(centerX + coreHalfSize + 3, centerY - 6, 12, 12);
+  ctx.fillRect(centerX + coreHalfSize + 3, centerY - 5, 12, 10);
+  ctx.strokeRect(centerX + coreHalfSize + 3, centerY - 5, 12, 10);
 
-  // North Refuge Island
-  ctx.fillRect(centerX - 6, centerY - coreHalfSize - 15, 12, 12);
-  ctx.strokeRect(centerX - 6, centerY - coreHalfSize - 15, 12, 12);
+  ctx.fillRect(centerX - 5, centerY - coreHalfSize - 15, 10, 12);
+  ctx.strokeRect(centerX - 5, centerY - coreHalfSize - 15, 10, 12);
 
-  // South Refuge Island
-  ctx.fillRect(centerX - 6, centerY + coreHalfSize + 3, 12, 12);
-  ctx.strokeRect(centerX - 6, centerY + coreHalfSize + 3, 12, 12);
+  ctx.fillRect(centerX - 5, centerY + coreHalfSize + 3, 10, 12);
+  ctx.strokeRect(centerX - 5, centerY + coreHalfSize + 3, 10, 12);
 
-  // 5. Protected Intersection Corner Curb Islands (Bulb-Outs separating turn bays from crosswalks)
+  // 5. Corner Curb Islands on the 4 Corners (Protecting crosswalks)
   ctx.fillStyle = '#CBD5E1';
   ctx.strokeStyle = '#64748B';
   ctx.lineWidth = 1.5;
 
-  // Northwest Corner Island
   ctx.beginPath();
-  ctx.arc(centerX - coreHalfSize, centerY - coreHalfSize, 14, 0, Math.PI * 2);
+  ctx.arc(centerX - coreHalfSize, centerY - coreHalfSize, 12, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // Northeast Corner Island
   ctx.beginPath();
-  ctx.arc(centerX + coreHalfSize, centerY - coreHalfSize, 14, 0, Math.PI * 2);
+  ctx.arc(centerX + coreHalfSize, centerY - coreHalfSize, 12, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // Southwest Corner Island
   ctx.beginPath();
-  ctx.arc(centerX - coreHalfSize, centerY + coreHalfSize, 14, 0, Math.PI * 2);
+  ctx.arc(centerX - coreHalfSize, centerY + coreHalfSize, 12, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // Southeast Corner Island
   ctx.beginPath();
-  ctx.arc(centerX + coreHalfSize, centerY + coreHalfSize, 14, 0, Math.PI * 2);
+  ctx.arc(centerX + coreHalfSize, centerY + coreHalfSize, 12, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  // 6. Turning Guide Lines inside crossroads core
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([8, 10]);
-  for (const tLane of turningLanes) {
-    ctx.beginPath();
-    for (let i = 0; i <= 20; i++) {
-      const pt = evaluateBezierFull(tLane.curve, i / 20);
-      if (i === 0) ctx.moveTo(pt.x, pt.y);
-      else ctx.lineTo(pt.x, pt.y);
-    }
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-
-  // 7. Right-Hand Traffic Pavement Arrows
-  ctx.font = 'bold 14px sans-serif';
+  // 6. Right-Hand Traffic Pavement Turn Stencils (Cleanly painted before stop lines)
+  ctx.font = 'bold 13px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
 
-  // Westbound Approach Arrows (North half, x = 1820)
-  ctx.fillText('⮠', 1820, centerY - 46); // Right turn
-  ctx.fillText('⮜', 1820, centerY - 24); // Through
-  ctx.fillText('⮧', 1820, centerY - 6);  // Left turn
+  // Westbound Approach Arrows (North half, x = centerX + coreHalfSize + 50)
+  ctx.fillText('⮠', centerX + coreHalfSize + 50, centerY - 46); // Right turn
+  ctx.fillText('⮜', centerX + coreHalfSize + 50, centerY - 24); // Through
+  ctx.fillText('⮧', centerX + coreHalfSize + 50, centerY - 7);  // Left turn
 
-  // Eastbound Approach Arrows (South half, x = 1380)
-  ctx.fillText('⮤', 1380, centerY + 6);  // Left turn
-  ctx.fillText('⮞', 1380, centerY + 24); // Through
-  ctx.fillText('⮡', 1380, centerY + 46); // Right turn
+  // Eastbound Approach Arrows (South half, x = centerX - coreHalfSize - 50)
+  ctx.fillText('⮤', centerX - coreHalfSize - 50, centerY + 7);  // Left turn
+  ctx.fillText('⮞', centerX - coreHalfSize - 50, centerY + 24); // Through
+  ctx.fillText('⮡', centerX - coreHalfSize - 50, centerY + 46); // Right turn
 
-  // Southbound Approach Arrows (West half, y = 980)
-  ctx.fillText('⮤', centerX - 46, 980); // Right turn
-  ctx.fillText('⮟', centerX - 24, 980); // Through
-  ctx.fillText('⮡', centerX - 6, 980);  // Left turn
+  // Southbound Approach Arrows (West half, y = centerY - coreHalfSize - 50)
+  ctx.fillText('⮤', centerX - 46, centerY - coreHalfSize - 50); // Right turn
+  ctx.fillText('⮟', centerX - 24, centerY - coreHalfSize - 50); // Through
+  ctx.fillText('⮡', centerX - 7, centerY - coreHalfSize - 50);  // Left turn
 
-  // Northbound Approach Arrows (East half, y = 1420)
-  ctx.fillText('⮠', centerX + 6, 1420);  // Left turn
-  ctx.fillText('⮝', centerX + 24, 1420); // Through
-  ctx.fillText('⮧', centerX + 46, 1420); // Right turn
+  // Northbound Approach Arrows (East half, y = centerY + coreHalfSize + 50)
+  ctx.fillText('⮠', centerX + 7, centerY + coreHalfSize + 50);  // Left turn
+  ctx.fillText('⮝', centerX + 24, centerY + coreHalfSize + 50); // Through
+  ctx.fillText('⮧', centerX + 46, centerY + coreHalfSize + 50); // Right turn
 
-  // 8. Draw Stop Bars & High-Visibility Zebra Crosswalks
+  // 7. Stop Bars & High-Visibility Zebra Crosswalks on all 4 approaches
   const primaryIntersection = intersections[0];
 
   for (const lane of throughLanes) {
@@ -262,7 +238,6 @@ export function drawRoads(
       }
 
       if (lane.type === 'sidewalk') {
-        // Curb ramp line
         ctx.strokeStyle = lightColor === 'green' ? '#22C55E' : '#EF4444';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -285,7 +260,7 @@ export function drawRoads(
             : '#22C55E';
 
         ctx.strokeStyle = stopLineColor;
-        ctx.lineWidth = 4.5;
+        ctx.lineWidth = 4;
         ctx.beginPath();
         if (lane.orientation === 'vertical') {
           ctx.moveTo(pt.x - halfH, pt.y);
@@ -296,8 +271,8 @@ export function drawRoads(
         }
         ctx.stroke();
 
-        // Zebra crosswalk stripes
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        // Zebra stripes across the roadway
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         if (lane.orientation === 'vertical') {
           for (let cx = pt.x - halfH + 3; cx < pt.x + halfH - 3; cx += 8) {
             const offset = lane.direction === 'reverse' ? 2 : -10;
@@ -313,7 +288,7 @@ export function drawRoads(
     }
   }
 
-  // 9. Draw 4 Master Signal Mast Heads & Left Turn Arrow Heads
+  // 8. 4 Master Traffic Signal Heads
   if (primaryIntersection?.type === 'lights' && signals.length > 0) {
     const sig = signals[0];
 
@@ -335,29 +310,29 @@ export function drawRoads(
     const nbPedState = sig.getSignalStateForLane('ns_walk_nb');
 
     // West Approach Signal (facing EB, on South side)
-    drawSignalHead(ctx, centerX - coreHalfSize - 14, centerY + 30, ebThrough, 'vertical');
-    drawTurnArrowSignal(ctx, centerX - coreHalfSize - 14, centerY + 6, ebLeft === 'green');
+    drawSignalHead(ctx, centerX - coreHalfSize - 12, centerY + 30, ebThrough, 'vertical');
+    drawTurnArrowSignal(ctx, centerX - coreHalfSize - 12, centerY + 7, ebLeft === 'green');
 
     // East Approach Signal (facing WB, on North side)
-    drawSignalHead(ctx, centerX + coreHalfSize + 14, centerY - 30, wbThrough, 'vertical');
-    drawTurnArrowSignal(ctx, centerX + coreHalfSize + 14, centerY - 6, wbLeft === 'green');
+    drawSignalHead(ctx, centerX + coreHalfSize + 12, centerY - 30, wbThrough, 'vertical');
+    drawTurnArrowSignal(ctx, centerX + coreHalfSize + 12, centerY - 7, wbLeft === 'green');
 
     // North Approach Signal (facing SB, on West side)
-    drawSignalHead(ctx, centerX - 30, centerY - coreHalfSize - 14, sbThrough, 'horizontal');
-    drawTurnArrowSignal(ctx, centerX - 6, centerY - coreHalfSize - 14, sbLeft === 'green');
+    drawSignalHead(ctx, centerX - 30, centerY - coreHalfSize - 12, sbThrough, 'horizontal');
+    drawTurnArrowSignal(ctx, centerX - 7, centerY - coreHalfSize - 12, sbLeft === 'green');
 
     // South Approach Signal (facing NB, on East side)
-    drawSignalHead(ctx, centerX + 30, centerY + coreHalfSize + 14, nbThrough, 'horizontal');
-    drawTurnArrowSignal(ctx, centerX + 6, centerY + coreHalfSize + 14, nbLeft === 'green');
+    drawSignalHead(ctx, centerX + 30, centerY + coreHalfSize + 12, nbThrough, 'horizontal');
+    drawTurnArrowSignal(ctx, centerX + 7, centerY + coreHalfSize + 12, nbLeft === 'green');
 
     // Pedestrian Walk / Don't Walk Heads on the 4 Corner Curbs
-    drawPedestrianSignal(ctx, centerX - coreHalfSize - 14, centerY - 95, wbPedState === 'green');
-    drawPedestrianSignal(ctx, centerX + coreHalfSize + 14, centerY + 95, ebPedState === 'green');
-    drawPedestrianSignal(ctx, centerX + 95, centerY - coreHalfSize - 14, nbPedState === 'green');
-    drawPedestrianSignal(ctx, centerX - 95, centerY + coreHalfSize + 14, sbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX - coreHalfSize - 12, centerY - 80, wbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX + coreHalfSize + 12, centerY + 80, ebPedState === 'green');
+    drawPedestrianSignal(ctx, centerX + 80, centerY - coreHalfSize - 12, nbPedState === 'green');
+    drawPedestrianSignal(ctx, centerX - 80, centerY + coreHalfSize + 12, sbPedState === 'green');
   }
 
-  // 10. Glowing 4-Side Perimeter Ingress & Outgress Portals
+  // 9. Glowing 4-Side Perimeter Ingress & Outgress Portals
   drawPortalBadge(ctx, 40, centerY, 'WEST PORTAL', 'Ingress (EB) · Outgress (WB)', '#3B82F6', 'left');
   drawPortalBadge(ctx, worldWidth - 40, centerY, 'EAST PORTAL', 'Ingress (WB) · Outgress (EB)', '#10B981', 'right');
   drawPortalBadge(ctx, centerX, 40, 'NORTH PORTAL', 'Ingress (SB) · Outgress (NB)', '#F59E0B', 'top');
